@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      time_off_requests: {
+        Row: {
+          approval_token: string
+          created_at: string
+          employee_email: string
+          employee_name: string
+          end_date: string
+          id: string
+          reason: string
+          start_date: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          approval_token?: string
+          created_at?: string
+          employee_email: string
+          employee_name: string
+          end_date: string
+          id?: string
+          reason: string
+          start_date: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          approval_token?: string
+          created_at?: string
+          employee_email?: string
+          employee_name?: string
+          end_date?: string
+          id?: string
+          reason?: string
+          start_date?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
