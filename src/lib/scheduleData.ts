@@ -1,9 +1,12 @@
 // CSV URLs for schedule data
-export const CURRENT_WEEK_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=0&single=true&output=csv";
-export const NEXT_WEEK_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=251849400&single=true&output=csv";
+export const CURRENT_WEEK_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=0&single=true&output=csv";
+export const NEXT_WEEK_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=251849400&single=true&output=csv";
 
 // CSV URL for excluded sites - expects columns: Name, Flag (optional), Note (optional)
-export const EXCLUDED_SITES_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=REPLACE_WITH_YOUR_GID&single=true&output=csv";
+export const EXCLUDED_SITES_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=74514299&single=true&output=csv&single=true&output=csv";
 
 export interface ExcludedSite {
   name: string;
@@ -49,7 +52,7 @@ export const dayLabel: Record<string, string> = {
   thursday: "Thursday",
   friday: "Friday",
   saturday: "Saturday",
-  sunday: "Sunday"
+  sunday: "Sunday",
 };
 
 export const displayOrder = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
@@ -83,7 +86,10 @@ export function parseCSV(text: string): ScheduleBundle | null {
     const notesRaw = (cols[4] || "").trim();
 
     const people = onDutyRaw
-      ? onDutyRaw.split(/[;|]/).map(p => p.trim()).filter(Boolean)
+      ? onDutyRaw
+          .split(/[;|]/)
+          .map((p) => p.trim())
+          .filter(Boolean)
       : [];
 
     schedule[dayKey] = people;
@@ -102,7 +108,11 @@ export async function loadScheduleBundle(csvUrl: string): Promise<ScheduleBundle
   return bundle;
 }
 
-export function isOpenNow(dayKey: string, now: Date, businessHours: Record<string, { open: string; close: string }>): boolean {
+export function isOpenNow(
+  dayKey: string,
+  now: Date,
+  businessHours: Record<string, { open: string; close: string }>,
+): boolean {
   const hours = businessHours[dayKey];
   if (!hours) return false;
 
