@@ -1,19 +1,29 @@
-import { useState, useMemo } from "react";
-import { NO_SUPPORT_SITES } from "@/lib/scheduleData";
+import { useState, useMemo, useEffect } from "react";
+import { EXCLUDED_SITES_CSV_URL, loadExcludedSites, ExcludedSite } from "@/lib/scheduleData";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, AlertTriangle } from "lucide-react";
+import { Search, AlertTriangle, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export function NoSupportList() {
   const [search, setSearch] = useState("");
+  const [sites, setSites] = useState<ExcludedSite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadExcludedSites(EXCLUDED_SITES_CSV_URL)
+      .then(setSites)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filteredSites = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return NO_SUPPORT_SITES
+    return sites
       .filter(s => `${s.name} ${s.note || ""} ${s.flag || ""}`.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [search]);
+  }, [search, sites]);
 
   return (
     <section className="glass-card rounded-xl p-6 space-y-4">
@@ -28,7 +38,7 @@ export function NoSupportList() {
           </div>
         </div>
         <span className="text-sm text-muted-foreground">
-          {filteredSites.length} / {NO_SUPPORT_SITES.length} shown
+          {filteredSites.length} / {sites.length} shown
         </span>
       </div>
 
@@ -49,7 +59,13 @@ export function NoSupportList() {
       </div>
 
       <ScrollArea className="h-[180px]">
-        {filteredSites.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : error ? (
+          <p className="text-sm text-destructive py-4">Failed to load excluded sites.</p>
+        ) : filteredSites.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4">No matches found.</p>
         ) : (
           <ul className="space-y-1">

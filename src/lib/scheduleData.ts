@@ -2,25 +2,43 @@
 export const CURRENT_WEEK_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=0&single=true&output=csv";
 export const NEXT_WEEK_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=251849400&single=true&output=csv";
 
-export const NO_SUPPORT_SITES = [
-  { name: "Accelerate – Milwaukee" },
-  { name: "Accelerate Mokena" },
-  { name: "Crossroads" },
-  { name: "DiVRgence" },
-  { name: "Fast Lane" },
-  { name: "Launch Gurnee", note: "CC Expired" },
-  { name: "Launch Warwick", flag: "*" },
-  { name: "Margaritaville", flag: "*" },
-  { name: "No Surrender" },
-  { name: "Palace Social", flag: "*" },
-  { name: "SacTown" },
-  { name: "Skyzone Topeka" },
-  { name: "The Zone San Juan" },
-  { name: "Yakima" },
-  { name: "Xtreme Action Park", note: "BUT: rectifying lost check" },
-  { name: "MB2" },
-  { name: "Thunder Road" },
-];
+// CSV URL for excluded sites - expects columns: Name, Flag (optional), Note (optional)
+export const EXCLUDED_SITES_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=REPLACE_WITH_YOUR_GID&single=true&output=csv";
+
+export interface ExcludedSite {
+  name: string;
+  flag?: string;
+  note?: string;
+}
+
+export function parseExcludedSitesCSV(text: string): ExcludedSite[] {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+
+  const delimiter = lines[0].includes(";") ? ";" : ",";
+  const sites: ExcludedSite[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const cols = lines[i].split(delimiter);
+
+    const name = (cols[0] || "").trim();
+    if (!name) continue;
+
+    const flag = (cols[1] || "").trim() || undefined;
+    const note = (cols[2] || "").trim() || undefined;
+
+    sites.push({ name, flag, note });
+  }
+
+  return sites;
+}
+
+export async function loadExcludedSites(csvUrl: string): Promise<ExcludedSite[]> {
+  const res = await fetch(csvUrl);
+  const csv = await res.text();
+  return parseExcludedSitesCSV(csv);
+}
 
 export const keyByIndex = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
