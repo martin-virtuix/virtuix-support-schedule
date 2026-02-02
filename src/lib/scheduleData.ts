@@ -6,7 +6,7 @@ export const NEXT_WEEK_CSV_URL =
 
 // CSV URL for excluded sites - expects columns: Name, Flag (optional), Note (optional)
 export const EXCLUDED_SITES_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=74514299&single=true&output=csv&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=74514299&single=true&output=csv";
 
 export interface ExcludedSite {
   name: string;
