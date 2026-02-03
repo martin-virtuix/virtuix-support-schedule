@@ -71,8 +71,8 @@ export default function Index() {
           />
         </header>
 
-        {/* Request Time Off Button */}
-        <div className="flex justify-center mb-8">
+        {/* Request Time Off Button - Hidden for now, small team */}
+        <div className="hidden flex justify-center mb-8">
           <Button asChild size="lg" className="gap-2 animate-pulse-glow">
             <Link to="/request-time-off">
               <Calendar className="w-5 h-5" />
