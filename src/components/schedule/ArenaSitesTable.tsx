@@ -126,6 +126,15 @@ export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps)
             >
               Current
             </button>
+            <button
+                onClick={() => setStatusFilter("no-support")}
+                className={[
+                    "h-9 rounded-md border px-3 text-sm",
+                    statusFilter === "no-support" ? "bg-muted" : "bg-background",
+                ].join(" ")}
+            >
+                No Support
+            </button>
           </div>
         </div>
 
