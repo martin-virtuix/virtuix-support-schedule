@@ -4,12 +4,13 @@ import { Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WeekCard } from "@/components/schedule/WeekCard";
 import { ScheduleTable } from "@/components/schedule/ScheduleTable";
-import { NoSupportList } from "@/components/schedule/NoSupportList";
 import {
   ScheduleBundle,
   CURRENT_WEEK_CSV_URL,
   NEXT_WEEK_CSV_URL,
   loadScheduleBundle,
+  getArenaSites,
+  type ArenaSite,
 } from "@/lib/scheduleData";
 import omniLogo from "@/assets/omniarena-logo.png";
 
@@ -34,18 +35,28 @@ export default function Index() {
   const [currentBundle, setCurrentBundle] = useState<ScheduleBundle | null>(null);
   const [nextBundle, setNextBundle] = useState<ScheduleBundle | null>(null);
   const [, setTick] = useState(0);
+  const [sites, setSites] = useState<ArenaSite[]>([]);
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [sitesError, setSitesError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [current, next] = await Promise.all([
+        const [current, next, sitesData] = await Promise.all([
           loadScheduleBundle(CURRENT_WEEK_CSV_URL),
           loadScheduleBundle(NEXT_WEEK_CSV_URL),
+          getArenaSites(),
         ]);
         setCurrentBundle(current);
         setNextBundle(next);
+        setSites(sitesData);
+        setSitesLoading(false);
+        setSitesError(null);
+
       } catch (err) {
         console.error("Error loading schedules:", err);
+        setSitesError("Failed to load sites");
+        setSitesLoading(false);
       }
     }
 
@@ -102,8 +113,54 @@ export default function Index() {
           </div>
         </div>
 
-        {/* No Support List */}
-        <NoSupportList />
+        {/* Omni Arena Sites */}
+        <div className="mt-8">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Omni Arena Sites
+            </h2>
+            <span className="text-sm text-muted-foreground">
+              Total: {sites.length}
+            </span>
+          </div>
+
+          {sitesLoading ? (
+            <p className="mt-2 text-sm text-muted-foreground">Loading sites…</p>
+          ) : sitesError ? (
+            <p className="mt-2 text-sm text-red-500">{sitesError}</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="p-2 text-left">Venue</th>
+                    <th className="p-2 text-left">Current Quarter Status</th>
+                    <th className="p-2 text-left">Notes</th>
+                    <th className="p-2 text-left">Main Contact</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sites.map((s, i) => (
+                    <tr key={`${s.venueName}-${i}`} className="border-t align-top">
+                      <td className="p-2 font-medium whitespace-nowrap">
+                        {s.venueName}
+                      </td>
+                      <td className="p-2 whitespace-nowrap">
+                        {s.currentQuarterStatus}
+                      </td>
+                      <td className="p-2 min-w-[320px]">
+                        {s.notes}
+                      </td>
+                      <td className="p-2 whitespace-nowrap">
+                        {s.primaryContact}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {/* Footer */}
         <footer className="mt-8 text-center text-sm text-muted-foreground">

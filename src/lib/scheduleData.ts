@@ -1,3 +1,5 @@
+import Papa from "papaparse"
+
 // CSV URLs for schedule data
 export const CURRENT_WEEK_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=0&single=true&output=csv";
@@ -41,6 +43,42 @@ export async function loadExcludedSites(csvUrl: string): Promise<ExcludedSite[]>
   const res = await fetch(csvUrl);
   const csv = await res.text();
   return parseExcludedSitesCSV(csv);
+}
+
+export interface ArenaSite {
+  venueName: string;
+  currentQuarterStatus: string;
+  notes: string;
+  primaryContact: string;
+}
+
+type SitesCsvRow = {
+  Name?: string;
+  "Current Quarter Status"?: string;
+  Notes?: string;
+  "Main Contact"?: string;
+};
+
+export async function getArenaSites(): Promise<ArenaSite[]> {
+    const res = await fetch(EXCLUDED_SITES_CSV_URL, { cache: "no-store"});
+      if(!res.ok) {
+        throw new Error(`Failed to fetch sites CSV (${res.status})`);
+    }
+  const csvText = await res.text();
+
+  const parsed = Papa.parse<SitesCsvRow>(csvText, {
+    header: true,
+    skipEmptyLines: true,   
+  });
+
+  return (parsed.data || [])
+    .map((row) => ({
+      venueName: (row.Name ?? "").trim(),
+      currentQuarterStatus: (row["Current Quarter Status"] ?? "").trim(),
+      notes: (row.Notes ?? "").trim(),
+      primaryContact: (row["Main Contact"] ?? "").trim(),
+    }))
+    .filter((s) => s.venueName.length > 0);
 }
 
 export const keyByIndex = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
