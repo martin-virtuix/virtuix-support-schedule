@@ -36,7 +36,7 @@ function Badge({ status }: { status: string }) {
   );
 }
 
-type StatusFilter = "all" | "current";
+type StatusFilter = "all" | "current" | "no-support";
 
 export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps) {
   const [query, setQuery] = useState("");
@@ -51,6 +51,13 @@ export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps)
     // filter: Current
     if (statusFilter === "current") {
       list = list.filter((s) => normalize(s.currentQuarterStatus) === "current");
+    }
+
+    if(statusFilter === "no-support") { 
+       list = list.filter((s) => {
+        const status = normalize(s.currentQuarterStatus);
+        return status === "no support" || status === "nosupport";
+       });
     }
 
     // search: venue, notes, contact, status
