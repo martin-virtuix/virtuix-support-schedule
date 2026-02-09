@@ -95,7 +95,7 @@ export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps)
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search venue, notes, contact…"
+            placeholder="Search venue, notes, contact… MAMAGUEVO"
             className="h-9 w-full sm:w-[320px] rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
 
