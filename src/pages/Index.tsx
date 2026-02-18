@@ -1,7 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { WeekCard } from "@/components/schedule/WeekCard";
 import { ScheduleTable } from "@/components/schedule/ScheduleTable";
 import { NoSupportList } from "@/components/schedule/NoSupportList";
@@ -70,16 +67,6 @@ export default function Index() {
             className="h-8 md:h-10 mx-auto opacity-80"
           />
         </header>
-
-        {/* Request Time Off Button - Hidden for now, small team */}
-        <div className="hidden flex justify-center mb-8">
-          <Button asChild size="lg" className="gap-2 animate-pulse-glow">
-            <Link to="/request-time-off">
-              <Calendar className="w-5 h-5" />
-              Request Time Off
-            </Link>
-          </Button>
-        </div>
 
         {/* Week Panels */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
