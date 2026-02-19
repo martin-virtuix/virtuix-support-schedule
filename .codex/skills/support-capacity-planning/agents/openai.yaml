@@ -1,0 +1,4 @@
+interface:
+  display_name: "Support Capacity Planning"
+  short_description: "Plan weekly support staffing and risk coverage"
+  default_prompt: "Use this skill to plan support staffing, identify coverage gaps, and create a weekly execution plan for Virtuix Support Schedule."
