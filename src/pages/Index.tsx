@@ -1,19 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { WeekCard } from "@/components/schedule/WeekCard";
 import { ScheduleTable } from "@/components/schedule/ScheduleTable";
-import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
+import { Button } from "@/components/ui/button";
 import {
   ScheduleBundle,
   CURRENT_WEEK_CSV_URL,
   NEXT_WEEK_CSV_URL,
   loadScheduleBundle,
-  getArenaSites,
-  type ArenaSite,
 } from "@/lib/scheduleData";
-import omniLogo from "@/assets/omniarena-logo.png";
+import omniOneSquareLogo from "@/assets/omnione_logo_square.png";
+import virtuixLogoWhite from "@/assets/virtuix_logo_white.png";
 
 function getWeekRange(offset: number = 0): string {
   const now = new Date();
@@ -36,28 +33,18 @@ export default function Index() {
   const [currentBundle, setCurrentBundle] = useState<ScheduleBundle | null>(null);
   const [nextBundle, setNextBundle] = useState<ScheduleBundle | null>(null);
   const [, setTick] = useState(0);
-  const [sites, setSites] = useState<ArenaSite[]>([]);
-  const [sitesLoading, setSitesLoading] = useState(true);
-  const [sitesError, setSitesError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [current, next, sitesData] = await Promise.all([
+        const [current, next] = await Promise.all([
           loadScheduleBundle(CURRENT_WEEK_CSV_URL),
           loadScheduleBundle(NEXT_WEEK_CSV_URL),
-          getArenaSites(),
         ]);
         setCurrentBundle(current);
         setNextBundle(next);
-        setSites(sitesData);
-        setSitesLoading(false);
-        setSitesError(null);
-
       } catch (err) {
         console.error("Error loading schedules:", err);
-        setSitesError("Failed to load sites");
-        setSitesLoading(false);
       }
     }
 
@@ -69,34 +56,34 @@ export default function Index() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container max-w-6xl py-8 px-4">
-        {/* Header */}
-        <header className="text-center mb-10">
-          <h1 className="text-3xl md:text-4xl font-bold mb-3">
-            Omni Arena & Omni One Support Schedule
-          </h1>
-          <img
-            src={omniLogo}
-            alt="Omni Arena"
-            className="h-8 md:h-10 mx-auto opacity-80"
-          />
-        </header>
-
-        {/* Request Time Off Button - Hidden for now, small team */}
-        <div className="hidden flex justify-center mb-8">
-          <Button asChild size="lg" className="gap-2 animate-pulse-glow">
-            <Link to="/request-time-off">
-              <Calendar className="w-5 h-5" />
-              Request Time Off
-            </Link>
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(86,130,3,0.12),transparent_44%)]" />
+      <div className="bg-gradient-to-b from-[#568203]/30 via-[#568203]/10 to-transparent">
+        <div className="container max-w-6xl py-4 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
+            <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
+          </div>
+          <Button asChild variant="secondary" size="sm">
+            <Link to="/hub">Login to Support Hub</Link>
           </Button>
         </div>
+      </div>
+
+      <div className="container max-w-6xl py-8 px-4 relative z-10">
+        <header className="text-center mb-8 rounded-2xl border bg-card/70 backdrop-blur-sm px-5 py-7 md:px-8">
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight mb-3">
+            Omni Arena & Omni One Support Schedule
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">
+            Live weekly coverage view for public support operations.
+          </p>
+        </header>
 
         {/* Week Panels */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           {/* Current Week */}
-          <div className="space-y-4">
+          <div className="space-y-4 rounded-2xl border bg-card/50 backdrop-blur-sm p-4 md:p-5">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Current week ({getWeekRange(0)})
             </h2>
@@ -105,7 +92,7 @@ export default function Index() {
           </div>
 
           {/* Next Week */}
-          <div className="space-y-4">
+          <div className="space-y-4 rounded-2xl border bg-card/50 backdrop-blur-sm p-4 md:p-5">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Next week ({getWeekRange(1)})
             </h2>
@@ -113,13 +100,6 @@ export default function Index() {
             <ScheduleTable bundle={nextBundle} highlightToday={false} />
           </div>
         </div>
-
-        {/* Omni Arena Sites */}
-        <ArenaSitesTable
-          sites={sites}
-          loading={sitesLoading}
-          error={sitesError}
-        />
 
         {/* Footer */}
         <footer className="mt-8 text-center text-sm text-muted-foreground">

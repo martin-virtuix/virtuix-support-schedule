@@ -14,6 +14,16 @@ interface ScheduleTableProps {
   highlightToday: boolean;
 }
 
+const dayPillLabel: Record<string, string> = {
+  monday: "MON",
+  tuesday: "TUE",
+  wednesday: "WED",
+  thursday: "THU",
+  friday: "FRI",
+  saturday: "SAT",
+  sunday: "SUN",
+};
+
 export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
   const now = new Date();
   const todayKey = keyByIndex[now.getDay()];
@@ -31,7 +41,7 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
   }
 
   return (
-    <div className="glass-card rounded-xl overflow-hidden">
+    <div className="glass-card rounded-xl overflow-hidden border bg-card/80 backdrop-blur-sm">
       <Table>
         <TableHeader>
           <TableRow className="border-border/50 hover:bg-transparent">
@@ -58,7 +68,15 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
                 )}
               >
                 <TableCell className={cn("font-medium", isToday && "text-primary")}>
-                  {dayLabel[key]}
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide",
+                      isToday ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/50 border-border text-foreground",
+                    )}
+                    title={dayLabel[key]}
+                  >
+                    {dayPillLabel[key] || dayLabel[key].slice(0, 3).toUpperCase()}
+                  </span>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {formatHours(key, bundle.businessHours)}

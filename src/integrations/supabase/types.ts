@@ -53,12 +53,102 @@ export type Database = {
         }
         Relationships: []
       }
+      zendesk_sync_runs: {
+        Row: {
+          created_at: string
+          cursor: number | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          started_at: string
+          status: string
+          tickets_fetched: number
+          tickets_upserted: number
+        }
+        Insert: {
+          created_at?: string
+          cursor?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          started_at?: string
+          status: string
+          tickets_fetched?: number
+          tickets_upserted?: number
+        }
+        Update: {
+          created_at?: string
+          cursor?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          tickets_fetched?: number
+          tickets_upserted?: number
+        }
+        Relationships: []
+      }
+      zendesk_tickets: {
+        Row: {
+          assignee_email: string | null
+          brand: string
+          created_at: string
+          id: string
+          priority: string | null
+          raw_payload: Json
+          requester_email: string | null
+          status: string
+          subject: string
+          synced_at: string
+          ticket_id: number
+          updated_at: string
+          zendesk_created_at: string | null
+          zendesk_updated_at: string | null
+        }
+        Insert: {
+          assignee_email?: string | null
+          brand?: string
+          created_at?: string
+          id?: string
+          priority?: string | null
+          raw_payload?: Json
+          requester_email?: string | null
+          status?: string
+          subject?: string
+          synced_at?: string
+          ticket_id: number
+          updated_at?: string
+          zendesk_created_at?: string | null
+          zendesk_updated_at?: string | null
+        }
+        Update: {
+          assignee_email?: string | null
+          brand?: string
+          created_at?: string
+          id?: string
+          priority?: string | null
+          raw_payload?: Json
+          requester_email?: string | null
+          status?: string
+          subject?: string
+          synced_at?: string
+          ticket_id?: number
+          updated_at?: string
+          zendesk_created_at?: string | null
+          zendesk_updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_virtuix_user: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
