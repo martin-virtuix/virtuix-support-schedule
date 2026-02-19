@@ -32,6 +32,8 @@ type ZendeskIncrementalResponse = {
   next_page?: string | null;
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -79,6 +81,44 @@ function getMissingEnvVars(): string[] {
   if (!SUPABASE_URL) missing.push("SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
   return missing;
+}
+
+function getRetryAfterMs(retryAfterHeader: string | null): number | null {
+  if (!retryAfterHeader) return null;
+  const seconds = Number.parseFloat(retryAfterHeader);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.ceil(seconds * 1000);
+  }
+  return null;
+}
+
+async function fetchZendeskWithRetry(url: string, authHeader: string): Promise<Response> {
+  const maxAttempts = 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (response.ok) {
+      return response;
+    }
+
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === maxAttempts) {
+      const bodyText = await response.text();
+      throw new Error(`Zendesk API error (${response.status}): ${bodyText}`);
+    }
+
+    const retryAfterMs = getRetryAfterMs(response.headers.get("retry-after"));
+    const backoffMs = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+    await sleep(retryAfterMs ?? backoffMs);
+  }
+
+  throw new Error("Zendesk retry loop exited unexpectedly");
 }
 
 async function getSyncOptions(req: Request): Promise<SyncOptions> {
@@ -132,6 +172,7 @@ serve(async (req) => {
   let runId: string | null = null;
   let fetchedCount = 0;
   let upsertedCount = 0;
+  let skipDueToRunning = false;
 
   try {
     let cursor = options.startTime;
@@ -164,7 +205,27 @@ serve(async (req) => {
       .single();
 
     if (runInsertError) {
-      throw new Error(`Failed to create sync run record: ${runInsertError.message}`);
+      // Unique partial index blocks concurrent "running" runs.
+      if (runInsertError.code === "23505") {
+        skipDueToRunning = true;
+      } else {
+        throw new Error(`Failed to create sync run record: ${runInsertError.message}`);
+      }
+    }
+
+    if (skipDueToRunning) {
+      return jsonResponse(
+        {
+          ok: true,
+          skipped: true,
+          reason: "A zendesk-sync run is already in progress.",
+        },
+        202,
+      );
+    }
+
+    if (!runData?.id) {
+      throw new Error("Failed to create sync run record: no run id returned");
     }
 
     runId = runData.id as string;
@@ -177,17 +238,7 @@ serve(async (req) => {
     let page = 0;
 
     while (nextPageUrl && page < maxPages) {
-      const zendeskResponse = await fetch(nextPageUrl, {
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!zendeskResponse.ok) {
-        const bodyText = await zendeskResponse.text();
-        throw new Error(`Zendesk API error (${zendeskResponse.status}): ${bodyText}`);
-      }
+      const zendeskResponse = await fetchZendeskWithRetry(nextPageUrl, authHeader);
 
       const payload = (await zendeskResponse.json()) as ZendeskIncrementalResponse;
       const tickets = payload.tickets ?? [];

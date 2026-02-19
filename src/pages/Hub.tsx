@@ -46,6 +46,44 @@ function formatUpdatedAt(value: string | null): string {
   return date.toLocaleString();
 }
 
+async function extractFunctionErrorMessage(error: unknown): Promise<string> {
+  if (!error || typeof error !== "object") {
+    return "Unknown sync error.";
+  }
+
+  const fallback =
+    "message" in error && typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : "Unknown sync error.";
+
+  const context = "context" in error ? (error as { context?: unknown }).context : null;
+  if (context && typeof context === "object") {
+    const response = context as Response;
+    if (typeof response.json === "function") {
+      try {
+        const body = await response.json();
+        if (body && typeof body === "object" && "error" in body && typeof (body as { error?: unknown }).error === "string") {
+          return (body as { error: string }).error;
+        }
+      } catch {
+        // Fall through to text/fallback
+      }
+    }
+    if (typeof response.text === "function") {
+      try {
+        const text = await response.text();
+        if (text.trim().length > 0) {
+          return text;
+        }
+      } catch {
+        // Fall through to fallback
+      }
+    }
+  }
+
+  return fallback;
+}
+
 function statusPillClasses(status: string): string {
   const normalized = status.toLowerCase();
   if (normalized === "new") {
@@ -460,7 +498,8 @@ export default function Hub() {
     });
 
     if (error) {
-      setSyncMessage(`Sync failed: ${error.message}`);
+      const details = await extractFunctionErrorMessage(error);
+      setSyncMessage(`Sync failed: ${details}`);
       setSyncLoading(false);
       return;
     }
