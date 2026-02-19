@@ -33,6 +33,25 @@ function isAllowedEmail(email?: string | null): boolean {
   return !!email && email.toLowerCase().endsWith(ALLOWED_DOMAIN);
 }
 
+function getAuthRedirectUrl(): string {
+  const configuredBase =
+    import.meta.env.VITE_AUTH_REDIRECT_URL?.trim() || import.meta.env.VITE_APP_URL?.trim();
+
+  if (configuredBase) {
+    try {
+      const url = new URL(configuredBase);
+      url.pathname = "/hub";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      // Fall through to runtime origin if env value is malformed.
+    }
+  }
+
+  return `${window.location.origin}/hub`;
+}
+
 function formatUpdatedAt(value: string | null): string {
   if (!value) {
     return "—";
@@ -464,7 +483,7 @@ export default function Hub() {
     setSubmitting(true);
     setStatus(null);
 
-    const redirectTo = `${window.location.origin}/hub`;
+    const redirectTo = getAuthRedirectUrl();
     const { error } = await supabase.auth.signInWithOtp({
       email: normalized,
       options: { emailRedirectTo: redirectTo },
