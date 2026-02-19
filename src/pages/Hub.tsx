@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,6 +32,25 @@ type SyncSummary = {
 
 function isAllowedEmail(email?: string | null): boolean {
   return !!email && email.toLowerCase().endsWith(ALLOWED_DOMAIN);
+}
+
+function getPasswordResetRedirectUrl(): string {
+  const configuredBase =
+    import.meta.env.VITE_AUTH_REDIRECT_URL?.trim() || import.meta.env.VITE_APP_URL?.trim();
+
+  if (configuredBase) {
+    try {
+      const url = new URL(configuredBase);
+      url.pathname = "/hub";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      // Fall through to runtime origin if env value is malformed.
+    }
+  }
+
+  return `${window.location.origin}/hub`;
 }
 
 function formatUpdatedAt(value: string | null): string {
@@ -205,8 +225,13 @@ export default function Hub() {
   const [session, setSession] = useState<Session | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [sites, setSites] = useState<ArenaSite[]>([]);
   const [sitesLoading, setSitesLoading] = useState(false);
   const [sitesError, setSitesError] = useState<string | null>(null);
@@ -241,8 +266,15 @@ export default function Hub() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        setRecoveryMode(true);
+        setStatus("Password recovery mode detected. Set a new password.");
+      }
+      if (event === "SIGNED_IN") {
+        setRecoveryMode(false);
+      }
     });
 
     return () => {
@@ -464,16 +496,15 @@ export default function Hub() {
     setSubmitting(true);
     setStatus(null);
 
-    const redirectTo = `${window.location.origin}/hub`;
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email: normalized,
-      options: { emailRedirectTo: redirectTo },
+      password,
     });
 
     if (error) {
       setStatus(error.message);
     } else {
-      setStatus("Check your email for the sign-in link.");
+      setStatus("Signed in.");
     }
 
     setSubmitting(false);
@@ -486,6 +517,53 @@ export default function Hub() {
       return;
     }
     setStatus("Signed out.");
+  }
+
+  async function handleForgotPassword() {
+    const normalized = email.trim().toLowerCase();
+    if (!isAllowedEmail(normalized)) {
+      setStatus("Use your @virtuix.com email address.");
+      return;
+    }
+
+    setResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(normalized, {
+      redirectTo: getPasswordResetRedirectUrl(),
+    });
+
+    if (error) {
+      setStatus(`Reset failed: ${error.message}`);
+    } else {
+      setStatus("Password reset email sent. Open the link, then set a new password here.");
+    }
+    setResetLoading(false);
+  }
+
+  async function handleUpdatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (newPassword.length < 8) {
+      setStatus("New password must be at least 8 characters.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setStatus("Passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      setStatus(`Password update failed: ${error.message}`);
+    } else {
+      setStatus("Password updated successfully. Please sign in.");
+      setRecoveryMode(false);
+      setNewPassword("");
+      setConfirmPassword("");
+      await supabase.auth.signOut();
+    }
+    setSubmitting(false);
   }
 
   async function handleSyncNow() {
@@ -519,10 +597,10 @@ export default function Hub() {
       <main className="min-h-screen bg-background">
         <div className="bg-gradient-to-b from-[#568203]/30 via-[#568203]/10 to-transparent">
           <div className="container max-w-7xl py-4 px-4">
-            <div className="flex items-center gap-3">
+            <Link to="/" className="inline-flex items-center gap-3">
               <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
               <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
-            </div>
+            </Link>
           </div>
         </div>
         <div className="container max-w-4xl py-12 px-4">
@@ -537,31 +615,72 @@ export default function Hub() {
       <main className="min-h-screen bg-background">
         <div className="bg-gradient-to-b from-[#568203]/30 via-[#568203]/10 to-transparent">
           <div className="container max-w-7xl py-4 px-4">
-            <div className="flex items-center gap-3">
+            <Link to="/" className="inline-flex items-center gap-3">
               <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
               <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
-            </div>
+            </Link>
           </div>
         </div>
 
         <div className="container max-w-4xl py-12 px-4">
           <section className="border rounded-lg p-6 space-y-4 bg-card">
             <h1 className="text-2xl font-bold">Support Hub Sign In</h1>
-            <p className="text-sm text-muted-foreground">
-              Internal access for Virtuix employees. Use your company email to receive a sign-in link.
-            </p>
-            <form className="space-y-3" onSubmit={handleSignIn}>
-              <Input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="name@virtuix.com"
-                required
-              />
-              <Button type="submit" disabled={submitting}>
-                {submitting ? "Sending link..." : "Send sign-in link"}
-              </Button>
-            </form>
+            {recoveryMode ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Set your new password below to complete recovery.
+                </p>
+                <form className="space-y-3" onSubmit={handleUpdatePassword}>
+                  <Input
+                    type="password"
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    placeholder="New password"
+                    required
+                  />
+                  <Input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Confirm new password"
+                    required
+                  />
+                  <Button type="submit" disabled={submitting}>
+                    {submitting ? "Updating..." : "Update password"}
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Internal access for Virtuix employees. Sign in with your company credentials.
+                </p>
+                <form className="space-y-3" onSubmit={handleSignIn}>
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="name@virtuix.com"
+                    required
+                  />
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Password"
+                    required
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="submit" disabled={submitting}>
+                      {submitting ? "Signing in..." : "Sign in"}
+                    </Button>
+                    <Button asChild type="button" variant="ghost">
+                      <Link to="/">Back to Schedule</Link>
+                    </Button>
+                  </div>
+                </form>
+              </>
+            )}
             {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
           </section>
         </div>
@@ -574,10 +693,10 @@ export default function Hub() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(86,130,3,0.12),transparent_42%)]" />
       <div className="bg-gradient-to-b from-[#568203]/30 via-[#568203]/10 to-transparent">
         <div className="container max-w-7xl py-4 px-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+          <Link to="/" className="inline-flex items-center gap-3">
             <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
             <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
-          </div>
+          </Link>
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline text-xs text-slate-300">{userEmail}</span>
           </div>
