@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Windows metadata artifacts
+*.Zone.Identifier
+
+# Supabase local temp cache
+supabase/.temp/
