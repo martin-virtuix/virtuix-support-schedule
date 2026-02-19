@@ -295,3 +295,96 @@ Modified (major):
   - Sticky table header enabled.
 - Ticket table polish:
   - Status badges styled as Zendesk-like pills (`new` yellow, `open` red, `pending` blue).
+
+## Addendum: Deployment/Auth/Runtime Stabilization (same session continuation)
+
+### 1) Runtime + Build Failure Debug (Local + Cloudflare)
+- Identified root cause for blank localhost and failed build/deploy:
+  - `src/lib/scheduleData.ts` had duplicate merge artifacts (duplicate `ArenaSite` + duplicate `getArenaSites()` exports).
+- Cleaned `src/lib/scheduleData.ts` to a single canonical implementation.
+- Verified recovery:
+  - `npm run build` passed
+  - `npm run test` passed
+  - `npm run dev` started successfully (auto-port if 8080 occupied)
+
+### 2) Dev Server Reliability
+- Updated Vite dev host binding to local IPv4 for safer startup:
+  - `vite.config.ts`: `server.host` set to `127.0.0.1`
+- Confirmed earlier `EPERM`/binding issues were environment + port conflicts.
+
+### 3) NPM/Dependency State
+- Installed dependencies to resolve missing module at runtime (`papaparse`).
+- Confirmed `package.json`/`package-lock.json` include required `papaparse` packages.
+
+### 4) Auth Redirect Hardening (Magic Link Cross-Device Issue)
+- Problem observed: magic link redirect depended on current origin/localhost, which breaks when opening link on another machine.
+- Implemented env-driven redirect fallback logic in Hub auth path:
+  - Prefer `VITE_AUTH_REDIRECT_URL`, then `VITE_APP_URL`, then fallback to `window.location.origin`.
+- Documented required env + Supabase redirect settings in README.
+
+### 5) Auth Mode Change: Email/Password
+- Switched `/hub` sign-in from magic-link OTP to email/password:
+  - `supabase.auth.signInWithPassword(...)`
+- Kept existing `@virtuix.com` domain guard and sign-out/session behavior.
+- Added password input UI.
+
+### 6) Forgot Password + Recovery Flow (then UI-hidden)
+- Implemented reset password capability in code:
+  - `resetPasswordForEmail(...)` + redirect handling
+  - `PASSWORD_RECOVERY` event detection
+  - new-password update form via `updateUser({ password })`
+- Due Supabase email limit constraints, hid the visible `Forgot password?` button from login UI for now.
+- Logic remains in code for future re-enable.
+
+### 7) Hub Navigation UX
+- Added `Back to Schedule` button on login page.
+- Made top-left logo group clickable to `/` across Hub states (loading/login/authenticated).
+
+### 8) Zendesk Sync Robustness + Scheduling
+- Added automatic cron sync every 5 minutes (Supabase DB migration using `pg_cron` + `pg_net`).
+- Added overlap protection:
+  - DB-level unique partial index for single `running` sync
+  - function-level graceful skip response (`202`) when a sync is already running
+- Added retry/backoff for Zendesk API transient failures (`429` / `5xx`) with `Retry-After` support.
+- Improved Hub sync error messaging to surface backend error details instead of generic non-2xx.
+
+### 9) UI/UX Refinements Continued
+- Public `/` and private `/hub` branding alignment completed:
+  - top-left logos standardized (`virtuix_logo_white` + `omnione_logo_square` ordering)
+- Public `/`:
+  - schedule-only layout retained
+  - day labels in schedule tables shown as pills (`MON`, `TUE`, etc.)
+- Hub `/hub`:
+  - ticket table enhancements retained (filters, status bubbles, requester, links, scroll + sticky headers)
+  - ArenaSitesTable updated to match ticket table shell (sticky header + limited visible rows)
+  - ArenaSites section header changed to Omni Arena logo
+
+### 10) Git Hygiene + Repo Cleanup
+- Added ignore rules:
+  - `*.Zone.Identifier`
+  - `supabase/.temp/`
+- Removed local junk metadata/temp artifacts.
+
+### 11) Documentation Update
+- Replaced old Lovable boilerplate README with accurate project README:
+  - architecture
+  - routes/features
+  - env/secrets
+  - Supabase/Zendesk workflow
+  - troubleshooting
+
+### 12) Branch/Push Summary
+- Changes were committed and pushed across active branches during session:
+  - `dev` updated with Hub/Auth/Zendesk/UI changes and follow-up fixes
+  - `main` merged/pushed with conflict resolution preserving intended `dev` behavior in conflicted files
+- Latest notable main updates include:
+  - build-break fix from duplicate exports
+  - README rewrite
+  - hidden forgot-password button (logic retained)
+
+## Current State Snapshot (end of continuation)
+- `/` works as public schedule view with updated UI and login CTA.
+- `/hub` uses email/password auth, domain-gated to Virtuix users.
+- Zendesk sync is operational with manual + scheduled sync and overlap protection.
+- UI reflects modern/minimal card style with standardized branding.
+- Build and test pass locally after runtime/build fixes.
