@@ -134,7 +134,36 @@ npx supabase db push
 npx supabase functions deploy zendesk-sync
 ```
 
-### Set secrets
+### New Edge Functions (Copilot + Digest)
+
+Deploy the new functions:
+
+```bash
+npx supabase functions deploy sync_zendesk
+npx supabase functions deploy summarize_ticket
+npx supabase functions deploy create_digest
+npx supabase functions deploy send_to_slack
+```
+
+Required function secrets:
+
+```bash
+# Zendesk sync
+ZENDESK_SUBDOMAIN
+ZENDESK_EMAIL
+ZENDESK_API_TOKEN
+ZENDESK_OMNI_ARENA_BRAND_ID
+ZENDESK_OMNI_ONE_BRAND_ID
+
+# AI ticket summarization
+OPENAI_API_KEY
+OPENAI_MODEL=gpt-4o-mini
+
+# Slack delivery
+SLACK_WEBHOOK_URL
+```
+
+Set or update secrets:
 
 ```bash
 npx supabase secrets set \
@@ -142,7 +171,16 @@ npx supabase secrets set \
   ZENDESK_EMAIL="<email>" \
   ZENDESK_API_TOKEN="<token>" \
   ZENDESK_OMNI_ARENA_BRAND_ID="360007126832" \
-  ZENDESK_OMNI_ONE_BRAND_ID="26871345286541"
+  ZENDESK_OMNI_ONE_BRAND_ID="26871345286541" \
+  OPENAI_API_KEY="<openai-key>" \
+  OPENAI_MODEL="gpt-4o-mini" \
+  SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>"
+```
+
+Apply schema updates for copilot/digest tables:
+
+```bash
+npx supabase db push
 ```
 
 ## Routing

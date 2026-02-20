@@ -10,7 +10,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sync:zendesk": "bash -lc 'source .env && curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"all\\\"}\"'",
+    "sync:zendesk:omni-one": "bash -lc 'source .env && curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"omni_one\\\"}\"'",
+    "sync:zendesk:omni-arena": "bash -lc 'source .env && curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"omni_arena\\\"}\"'"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

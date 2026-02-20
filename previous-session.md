@@ -388,3 +388,98 @@ Modified (major):
 - Zendesk sync is operational with manual + scheduled sync and overlap protection.
 - UI reflects modern/minimal card style with standardized branding.
 - Build and test pass locally after runtime/build fixes.
+
+## Session Continuation (2026-02-19 to 2026-02-20)
+
+### 1) New Support Copilot + Digest Backend
+- Added migration: `supabase/migrations/20260219131500_add_support_copilot_tables.sql`
+  - New tables: `ticket_cache`, `ticket_summaries`, `digests`, `digest_tickets`
+  - Added indexes and `updated_at` triggers
+  - Enabled RLS + read policies for authenticated `@virtuix.com` users
+- Added new Supabase Edge Functions:
+  - `supabase/functions/sync_zendesk/index.ts`
+  - `supabase/functions/summarize_ticket/index.ts`
+  - `supabase/functions/create_digest/index.ts`
+  - `supabase/functions/send_to_slack/index.ts`
+
+### 2) Frontend Hub Rework
+- Rebuilt `src/pages/Hub.tsx` to support:
+  - Left sidebar navigation (Ticket Operations + Digests)
+  - Right docked AI Copilot panel (chat-style helper UI)
+  - Mobile collapse via Sheets for sidebar/copilot
+- Added ticket workflow features:
+  - Row selection in ticket tables
+  - `Generate Digest` from selected tickets or current filters
+  - Ticket drawer with:
+    - summary display
+    - refresh summary
+    - send summary to Slack
+    - copy summary
+- Added digest workflow features:
+  - Digest list/detail view under `/hub/digests`
+  - send digest to Slack
+  - copy markdown
+  - copy table format
+- Added data contracts in `src/types/support.ts`
+- Extended Supabase TS table types in `src/integrations/supabase/types.ts`
+- Added `/hub/digests` route in `src/App.tsx`
+
+### 3) Manual CLI Sync Helpers
+- Added npm scripts in `package.json`:
+  - `sync:zendesk`
+  - `sync:zendesk:omni-one`
+  - `sync:zendesk:omni-arena`
+- Scripts call `sync_zendesk` directly via `curl` using `.env` keys.
+
+### 4) README Updates
+- Expanded setup docs for new feature stack:
+  - new edge function deploy commands
+  - required secrets (`OPENAI_API_KEY`, `OPENAI_MODEL`, `SLACK_WEBHOOK_URL`, Zendesk secrets)
+  - migration/deploy steps
+
+### 5) Critical Production Debugging (Root Cause + Fixes)
+- Symptoms observed:
+  - Missing `ticket_cache`/`digests` table errors in schema cache
+  - Sync button failing with non-2xx
+  - Manual CLI sync succeeding
+- Root cause discovered:
+  - Supabase CLI was linked to wrong project (`crkcikzcezljlgqmbyuc`) while frontend used `ddqacivmenvlidzxxhyv`
+- Recovery performed:
+  - Relinked CLI to `ddqacivmenvlidzxxhyv`
+  - Deleted generated/dangerous snapshot migration `20260219222030_remote_schema.sql`
+  - Marked `20260216003000` as applied to avoid running old hardcoded scheduler SQL
+  - Pushed intended migration `20260219131500`
+  - Deployed all four new functions to correct project
+  - Verified table endpoints and function availability in correct project
+
+### 6) Sync Button 401/Invalid JWT Incident
+- Browser request failed with:
+  - `401 Unauthorized`
+  - `{"code":401,"message":"Invalid JWT"}`
+- Added auth-retry wrapper in `Hub.tsx` for function calls:
+  - refresh session and retry once when JWT invalid
+- Remaining user-facing issue persisted for sync action in browser context.
+
+### 7) Final Sync Reliability Hard Fallback
+- Implemented Sync-button hard fallback path in `Hub.tsx`:
+  - primary: `supabase.functions.invoke("sync_zendesk")`
+  - fallback on error: direct `fetch` to `.../functions/v1/sync_zendesk` with anon key headers (same behavior as working CLI/manual route)
+- Verified fallback path works from UI and sync can run repeatedly.
+
+### 8) Current Known Caveat
+- Omni One/Omni Arena UI visibility depends on correct Zendesk brand ID secrets.
+- If IDs are wrong, tickets may sync into `brand='unknown'` and not appear in brand-filtered tables.
+
+### 9) Local Runtime State
+- Dev server restarted and confirmed available at `http://127.0.0.1:8080/` for local validation.
+
+
+### 10) Final UX Layout Adjustment (/hub width)
+- Widened Hub shell to reduce horizontal table scrolling pressure and better use space between left sidebar and right copilot.
+- Updated `src/pages/Hub.tsx`:
+  - container max width increased from `1600px` to `1900px` (header + content)
+  - grid columns rebalanced to favor center table area:
+    - `lg`: `220px / 1fr`
+    - `xl`: `220px / 1fr / 300px`
+    - `2xl`: `240px / 1fr / 320px`
+- Result: noticeably wider center content area with less need for sideways scrolling in ticket tables.
