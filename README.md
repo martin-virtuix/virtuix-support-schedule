@@ -143,6 +143,7 @@ npx supabase functions deploy sync_zendesk
 npx supabase functions deploy summarize_ticket
 npx supabase functions deploy create_digest
 npx supabase functions deploy send_to_slack
+npx supabase functions deploy copilot_chat
 ```
 
 Required function secrets:

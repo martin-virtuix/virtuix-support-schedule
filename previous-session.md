@@ -488,3 +488,25 @@ Modified (major):
 - Pushed feature commit to `main` (`8da6bad`) including new support copilot/digest workflow and sync fallback changes.
 - Added additional `.gitignore` rules to keep local/session-only artifacts out of source control and restore clean status.
 - Verified local working tree cleanliness after ignore updates.
+
+### 12) Function Reliability + Real Copilot Chat (latest)
+- Diagnosed non-sync function failures and confirmed root cause with direct function probes:
+  - `summarize_ticket` failed due missing `OPENAI_API_KEY`
+  - `copilot_chat` failed due missing `OPENAI_API_KEY`
+  - `send_to_slack` failed due missing `SLACK_WEBHOOK_URL`
+  - `create_digest` confirmed operational with successful persisted output
+- Implemented robust frontend function invocation path in `src/pages/Hub.tsx`:
+  - primary path: `supabase.functions.invoke`
+  - auth refresh + retry on invalid JWT
+  - fallback path: direct anon-key HTTP call to edge function endpoint
+  - applied to sync, summarize, create digest, and Slack send actions
+- Replaced static Copilot response logic with backend AI chat calls:
+  - new edge function: `supabase/functions/copilot_chat/index.ts`
+  - frontend copilot panel now sends/receives live model responses per message
+  - added `CopilotChatResponse` type in `src/types/support.ts`
+- Updated README deploy section to include `copilot_chat` deployment command.
+- Deployed `copilot_chat` to Supabase project `ddqacivmenvlidzxxhyv`.
+- Required secrets identified and documented for full functionality:
+  - `OPENAI_API_KEY`
+  - `OPENAI_MODEL` (recommended)
+  - `SLACK_WEBHOOK_URL`

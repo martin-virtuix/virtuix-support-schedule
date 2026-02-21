@@ -12,6 +12,7 @@ import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
 import { getArenaSites, type ArenaSite } from "@/lib/scheduleData";
 import { useToast } from "@/hooks/use-toast";
 import type {
+  CopilotChatResponse,
   CreateDigestResponse,
   Digest,
   SendToSlackResponse,
@@ -121,7 +122,7 @@ function isInvalidJwtMessage(message: string): boolean {
   return message.toLowerCase().includes("invalid jwt");
 }
 
-async function invokeSyncWithAnonKeyFallback(): Promise<SyncZendeskResponse> {
+async function invokeFunctionWithAnonKeyFallback<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
@@ -129,21 +130,21 @@ async function invokeSyncWithAnonKeyFallback(): Promise<SyncZendeskResponse> {
     throw new Error("Supabase URL or publishable key is missing in frontend env.");
   }
 
-  const response = await fetch(`${url}/functions/v1/sync_zendesk`, {
+  const response = await fetch(`${url}/functions/v1/${name}`, {
     method: "POST",
     headers: {
       apikey: anonKey,
       Authorization: `Bearer ${anonKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ brand: "all" }),
+    body: JSON.stringify(body),
   });
 
   const text = await response.text();
-  let parsed: SyncZendeskResponse | null = null;
+  let parsed: (T & { error?: string; message?: string }) | null = null;
   if (text.trim().length > 0) {
     try {
-      parsed = JSON.parse(text) as SyncZendeskResponse;
+      parsed = JSON.parse(text) as T & { error?: string; message?: string };
     } catch {
       parsed = null;
     }
@@ -151,13 +152,19 @@ async function invokeSyncWithAnonKeyFallback(): Promise<SyncZendeskResponse> {
 
   if (!response.ok) {
     const message =
-      parsed && typeof parsed.error === "string" && parsed.error.length > 0
+      parsed?.error && typeof parsed.error === "string"
         ? parsed.error
-        : `Fallback sync failed (${response.status}).`;
+        : parsed?.message && typeof parsed.message === "string"
+          ? parsed.message
+          : `Fallback call failed for ${name} (${response.status}).`;
     throw new Error(message);
   }
 
-  return parsed ?? { ok: true };
+  if (!parsed) {
+    throw new Error(`Fallback call returned empty response for ${name}.`);
+  }
+
+  return parsed as T;
 }
 
 function normalizeSummaryRecord(item: {
@@ -227,7 +234,11 @@ function SideNavigation({ userEmail, onSignOut }: { userEmail: string; onSignOut
   );
 }
 
-function CopilotPanel({ omniOneCount, omniArenaCount, digestCount }: { omniOneCount: number; omniArenaCount: number; digestCount: number }) {
+function CopilotPanel({
+  onAsk,
+}: {
+  onAsk: (messages: Array<{ role: "user" | "assistant"; content: string }>) => Promise<string>;
+}) {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
     {
       role: "assistant",
@@ -236,31 +247,26 @@ function CopilotPanel({ omniOneCount, omniArenaCount, digestCount }: { omniOneCo
     },
   ]);
   const [prompt, setPrompt] = useState("");
+  const [sending, setSending] = useState(false);
 
-  function answerFor(input: string): string {
-    const text = input.toLowerCase();
-
-    if (text.includes("count") || text.includes("queue") || text.includes("open")) {
-      return `Current cached queue: Omni One ${omniOneCount} tickets, Omni Arena ${omniArenaCount} tickets. Total ${omniOneCount + omniArenaCount}.`;
-    }
-
-    if (text.includes("digest")) {
-      return "Use row selection first when you need a focused digest. If nothing is selected, generate from the current filter to capture queue slices.";
-    }
-
-    if (text.includes("slack")) {
-      return "Send high-priority ticket summaries to Slack from the ticket drawer, and team-wide rollups from the Digests page.";
-    }
-
-    return `Suggested sequence: sync -> summarize blocked tickets -> generate digest -> post to Slack. Stored digests available: ${digestCount}.`;
-  }
-
-  function sendPrompt() {
+  async function sendPrompt() {
     const value = prompt.trim();
     if (!value) return;
-    const reply = answerFor(value);
-    setMessages((prev) => [...prev, { role: "user", content: value }, { role: "assistant", content: reply }]);
+    const userMessage = { role: "user" as const, content: value };
+    const history = [...messages, userMessage];
+    setMessages(history);
     setPrompt("");
+    setSending(true);
+
+    try {
+      const reply = await onAsk(history);
+      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "Copilot request failed.";
+      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${details}` }]);
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -285,12 +291,13 @@ function CopilotPanel({ omniOneCount, omniArenaCount, digestCount }: { omniOneCo
             {message.content}
           </div>
         ))}
+        {sending ? <p className="text-xs text-muted-foreground">Copilot is typing...</p> : null}
       </div>
 
       <div className="space-y-2 border-t px-4 py-3">
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => setPrompt("Queue counts")}>Queue counts</Button>
-          <Button size="sm" variant="outline" onClick={() => setPrompt("Digest strategy")}>Digest strategy</Button>
+          <Button size="sm" variant="outline" onClick={() => setPrompt("What should we prioritize in the queue today?")}>Prioritize queue</Button>
+          <Button size="sm" variant="outline" onClick={() => setPrompt("Draft a digest strategy for unresolved tickets.")}>Digest strategy</Button>
         </div>
         <div className="flex items-end gap-2">
           <Textarea
@@ -299,7 +306,7 @@ function CopilotPanel({ omniOneCount, omniArenaCount, digestCount }: { omniOneCo
             placeholder="Ask Copilot..."
             className="min-h-[74px] resize-none"
           />
-          <Button size="icon" onClick={sendPrompt} aria-label="Send copilot prompt">
+          <Button size="icon" onClick={sendPrompt} aria-label="Send copilot prompt" disabled={sending}>
             <Send className="h-4 w-4" />
           </Button>
         </div>
@@ -718,6 +725,25 @@ export default function Hub() {
     return result;
   }
 
+  async function invokeFunctionRobust<T>(name: string, body: Record<string, unknown>): Promise<T> {
+    const primary = await invokeFunctionWithAuthRetry<T>(name, body);
+    if (!primary.error) {
+      if (primary.data === null || primary.data === undefined) {
+        throw new Error(`Function ${name} returned an empty payload.`);
+      }
+      return primary.data;
+    }
+
+    const primaryMessage = await extractFunctionErrorMessage(primary.error);
+    try {
+      return await invokeFunctionWithAnonKeyFallback<T>(name, body);
+    } catch (fallbackError) {
+      const fallbackMessage =
+        fallbackError instanceof Error ? fallbackError.message : "Unknown fallback error.";
+      throw new Error(`${primaryMessage} | Fallback failed: ${fallbackMessage}`);
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -992,43 +1018,19 @@ export default function Hub() {
     setSyncLoading(true);
     setSyncMessage(null);
 
-    const { data, error } = await invokeFunctionWithAuthRetry<SyncZendeskResponse>("sync_zendesk", { brand: "all" });
-
-    if (error) {
-      const details = await extractFunctionErrorMessage(error);
-      try {
-        const fallbackData = await invokeSyncWithAnonKeyFallback();
-        const fallbackUpserted = fallbackData.tickets_upserted ?? 0;
-        const fallbackMessage = fallbackData.skipped
-          ? fallbackData.reason || "Sync skipped."
-          : `Sync completed. ${fallbackUpserted} tickets updated.`;
-        setSyncMessage(`${fallbackMessage} (fallback path)`);
-        toast({ title: "Zendesk sync", description: `${fallbackMessage} (fallback path)` });
-        setSyncLoading(false);
-        setRefreshKey((value) => value + 1);
-        return;
-      } catch (fallbackError) {
-        const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "Fallback sync failed.";
-        setSyncMessage(`Sync failed: ${details}`);
-        toast({
-          title: "Sync failed",
-          description: `${details} | Fallback failed: ${fallbackMessage}`,
-          variant: "destructive",
-        });
-        if (isInvalidJwtMessage(details)) {
-          toast({
-            title: "Session expired",
-            description: "Please sign out and sign back in, then retry sync.",
-            variant: "destructive",
-          });
-        }
-        setSyncLoading(false);
-        return;
-      }
+    let data: SyncZendeskResponse;
+    try {
+      data = await invokeFunctionRobust<SyncZendeskResponse>("sync_zendesk", { brand: "all" });
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "Unknown sync error.";
+      setSyncMessage(`Sync failed: ${details}`);
+      toast({ title: "Sync failed", description: details, variant: "destructive" });
+      setSyncLoading(false);
+      return;
     }
 
-    const upserted = data?.tickets_upserted ?? 0;
-    const message = data?.skipped ? data.reason || "Sync skipped." : `Sync completed. ${upserted} tickets updated.`;
+    const upserted = data.tickets_upserted ?? 0;
+    const message = data.skipped ? data.reason || "Sync skipped." : `Sync completed. ${upserted} tickets updated.`;
     setSyncMessage(message);
     toast({ title: "Zendesk sync", description: message });
     setSyncLoading(false);
@@ -1072,14 +1074,20 @@ export default function Hub() {
   async function refreshTicketSummary(ticketId: number, refresh: boolean) {
     setSummaryLoadingTicketId(ticketId);
 
-    const { data, error } = await invokeFunctionWithAuthRetry<SummarizeTicketResponse>("summarize_ticket", {
-      ticket_id: ticketId,
-      refresh,
-    });
-
-    if (error || !data?.ok) {
-      const details = error ? await extractFunctionErrorMessage(error) : data?.error || "Summary generation failed.";
+    let data: SummarizeTicketResponse;
+    try {
+      data = await invokeFunctionRobust<SummarizeTicketResponse>("summarize_ticket", {
+        ticket_id: ticketId,
+        refresh,
+      });
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "Summary generation failed.";
       toast({ title: "Summary error", description: details, variant: "destructive" });
+      setSummaryLoadingTicketId(null);
+      return;
+    }
+    if (!data.ok) {
+      toast({ title: "Summary error", description: data.error || "Summary generation failed.", variant: "destructive" });
       setSummaryLoadingTicketId(null);
       return;
     }
@@ -1103,14 +1111,20 @@ export default function Hub() {
   async function handleGenerateDigest(request: DigestRequest) {
     setGeneratingDigest(true);
 
-    const { data, error } = await invokeFunctionWithAuthRetry<CreateDigestResponse>("create_digest", {
-      ticket_ids: request.ticketIds,
-      filters: request.filters,
-    });
-
-    if (error || !data?.ok) {
-      const details = error ? await extractFunctionErrorMessage(error) : data?.error || "Digest generation failed.";
+    let data: CreateDigestResponse;
+    try {
+      data = await invokeFunctionRobust<CreateDigestResponse>("create_digest", {
+        ticket_ids: request.ticketIds,
+        filters: request.filters,
+      });
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "Digest generation failed.";
       toast({ title: "Digest error", description: details, variant: "destructive" });
+      setGeneratingDigest(false);
+      return;
+    }
+    if (!data.ok) {
+      toast({ title: "Digest error", description: data.error || "Digest generation failed.", variant: "destructive" });
       setGeneratingDigest(false);
       return;
     }
@@ -1124,14 +1138,19 @@ export default function Hub() {
   }
 
   async function sendTicketSummaryToSlack(ticketId: number) {
-    const { data, error } = await invokeFunctionWithAuthRetry<SendToSlackResponse>("send_to_slack", {
-      type: "ticket_summary",
-      ticket_id: ticketId,
-    });
-
-    if (error || !data?.ok) {
-      const details = error ? await extractFunctionErrorMessage(error) : data?.error || "Failed to send ticket summary to Slack.";
+    let data: SendToSlackResponse;
+    try {
+      data = await invokeFunctionRobust<SendToSlackResponse>("send_to_slack", {
+        type: "ticket_summary",
+        ticket_id: ticketId,
+      });
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "Failed to send ticket summary to Slack.";
       toast({ title: "Slack send failed", description: details, variant: "destructive" });
+      return;
+    }
+    if (!data.ok) {
+      toast({ title: "Slack send failed", description: data.error || "Failed to send ticket summary to Slack.", variant: "destructive" });
       return;
     }
 
@@ -1139,14 +1158,19 @@ export default function Hub() {
   }
 
   async function sendDigestToSlack(digestId: string) {
-    const { data, error } = await invokeFunctionWithAuthRetry<SendToSlackResponse>("send_to_slack", {
-      type: "digest",
-      digest_id: digestId,
-    });
-
-    if (error || !data?.ok) {
-      const details = error ? await extractFunctionErrorMessage(error) : data?.error || "Failed to send digest to Slack.";
+    let data: SendToSlackResponse;
+    try {
+      data = await invokeFunctionRobust<SendToSlackResponse>("send_to_slack", {
+        type: "digest",
+        digest_id: digestId,
+      });
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "Failed to send digest to Slack.";
       toast({ title: "Slack send failed", description: details, variant: "destructive" });
+      return;
+    }
+    if (!data.ok) {
+      toast({ title: "Slack send failed", description: data.error || "Failed to send digest to Slack.", variant: "destructive" });
       return;
     }
 
@@ -1194,6 +1218,23 @@ export default function Hub() {
     } catch {
       toast({ title: "Copy failed", description: "Clipboard is not available.", variant: "destructive" });
     }
+  }
+
+  async function handleCopilotAsk(messages: Array<{ role: "user" | "assistant"; content: string }>): Promise<string> {
+    const data = await invokeFunctionRobust<CopilotChatResponse>("copilot_chat", {
+      messages,
+      context: {
+        omni_one_ticket_count: omniOneTickets.length,
+        omni_arena_ticket_count: omniArenaTickets.length,
+        digest_count: digests.length,
+      },
+    });
+
+    if (!data.ok) {
+      throw new Error(data.error || "Copilot response failed.");
+    }
+
+    return data.reply;
   }
 
   const allTicketCount = omniOneTickets.length + omniArenaTickets.length;
@@ -1397,7 +1438,7 @@ export default function Hub() {
           </section>
 
           <aside className="hidden xl:block">
-            <CopilotPanel omniOneCount={omniOneTickets.length} omniArenaCount={omniArenaTickets.length} digestCount={digests.length} />
+            <CopilotPanel onAsk={handleCopilotAsk} />
           </aside>
         </div>
       </div>
@@ -1413,7 +1454,7 @@ export default function Hub() {
       <Sheet open={mobileCopilotOpen} onOpenChange={setMobileCopilotOpen}>
         <SheetContent side="right" className="w-full p-0 sm:max-w-md">
           <div className="h-full p-4">
-            <CopilotPanel omniOneCount={omniOneTickets.length} omniArenaCount={omniArenaTickets.length} digestCount={digests.length} />
+            <CopilotPanel onAsk={handleCopilotAsk} />
           </div>
         </SheetContent>
       </Sheet>

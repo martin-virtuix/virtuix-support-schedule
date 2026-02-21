@@ -69,3 +69,10 @@ export type SendToSlackResponse = {
   ticket_id?: number;
   error?: string;
 };
+
+export type CopilotChatResponse = {
+  ok: boolean;
+  reply: string;
+  model?: string;
+  error?: string;
+};
