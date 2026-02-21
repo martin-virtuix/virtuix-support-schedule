@@ -25,6 +25,14 @@ dist-ssr
 
 # Windows metadata artifacts
 *.Zone.Identifier
+*:Zone.Identifier
 
 # Supabase local temp cache
 supabase/.temp/
+
+# Local/session artifacts not meant for source control
+Architecture.md
+src/assets/omnione_logo_square .png
+supabase/functions/deno.json
+supabase/functions/refresh-open-tickets/
+supabase/migrations/20260216003000_schedule_open_ticket_sync.sql

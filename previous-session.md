@@ -483,3 +483,8 @@ Modified (major):
     - `xl`: `220px / 1fr / 300px`
     - `2xl`: `240px / 1fr / 320px`
 - Result: noticeably wider center content area with less need for sideways scrolling in ticket tables.
+
+### 11) Session Closeout + Repo Hygiene
+- Pushed feature commit to `main` (`8da6bad`) including new support copilot/digest workflow and sync fallback changes.
+- Added additional `.gitignore` rules to keep local/session-only artifacts out of source control and restore clean status.
+- Verified local working tree cleanliness after ignore updates.
