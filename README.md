@@ -78,6 +78,16 @@ Optional (only for Zendesk link fallback in UI):
 VITE_ZENDESK_SUBDOMAIN="<your-subdomain>"
 ```
 
+Optional for CLI edge-function probes (`npm run sync:zendesk*`):
+
+```bash
+# Preferred for operator scripts
+SUPABASE_SERVICE_ROLE_KEY="<service-role-jwt>"
+
+# Alternative override when testing with a user JWT
+SUPABASE_FUNCTION_TOKEN="<access-token-jwt>"
+```
+
 ### Supabase Edge Function Secrets
 
 Set in Supabase (not in `.env`):
@@ -146,6 +156,30 @@ npx supabase functions deploy send_to_slack
 npx supabase functions deploy copilot_chat
 ```
 
+### Edge Function Auth Baseline (prevents `Invalid JWT` gateway failures)
+
+This project now standardizes auth in function code (not gateway JWT enforcement):
+
+- `supabase/config.toml` sets `verify_jwt = false` for:
+  - `sync_zendesk`
+  - `zendesk-sync`
+  - `summarize_ticket`
+  - `create_digest`
+  - `send_to_slack`
+  - `copilot_chat`
+- Each function validates bearer tokens with shared helper:
+  - `supabase/functions/_shared/auth.ts`
+  - `supabase/functions/_shared/auth_debug.ts`
+- Frontend calls functions with the current user access token from session (`Authorization: Bearer <access_token>`).
+
+Rollout checklist for any new function:
+
+1. Add `[functions.<name>] verify_jwt = false` in `supabase/config.toml`.
+2. In the function, call `authorizeVirtuixRequest(req, { functionName: "<name>" })` (or `allowServiceRole: true` only where needed).
+3. Return `HttpError.status` directly (never wrap auth failures in 200).
+4. Deploy function after changes.
+5. Validate with one unauthenticated request (expect 401 from function JSON) and one authenticated request (expect 200).
+
 Required function secrets:
 
 ```bash
@@ -158,7 +192,8 @@ ZENDESK_OMNI_ONE_BRAND_ID
 
 # AI ticket summarization
 OPENAI_API_KEY
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL_FALLBACKS=gpt-4o-mini,gpt-4.1,gpt-4o
 
 # Slack delivery
 SLACK_WEBHOOK_URL
@@ -174,7 +209,8 @@ npx supabase secrets set \
   ZENDESK_OMNI_ARENA_BRAND_ID="360007126832" \
   ZENDESK_OMNI_ONE_BRAND_ID="26871345286541" \
   OPENAI_API_KEY="<openai-key>" \
-  OPENAI_MODEL="gpt-4o-mini" \
+  OPENAI_MODEL="gpt-4.1-mini" \
+  OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o" \
   SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>"
 ```
 

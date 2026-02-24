@@ -1,10 +1,16 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authorizeVirtuixRequest, HttpError } from "../_shared/auth.ts";
+import { buildModelCandidates, requestChatCompletionWithModelFallback } from "../_shared/openai_chat.ts";
 
 type SummaryPayload = {
   summary: string;
   key_actions: string[];
   next_steps: string[];
+};
+
+type GeneratedSummary = SummaryPayload & {
+  model: string;
 };
 
 const corsHeaders = {
@@ -16,7 +22,8 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL");
+const OPENAI_MODEL_FALLBACKS = Deno.env.get("OPENAI_MODEL_FALLBACKS");
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -75,7 +82,7 @@ function compactTicketForPrompt(ticket: Record<string, unknown>): Record<string,
   };
 }
 
-async function generateSummary(ticket: Record<string, unknown>): Promise<SummaryPayload> {
+async function generateSummary(ticket: Record<string, unknown>): Promise<GeneratedSummary> {
   if (!OPENAI_API_KEY) {
     throw new Error("Missing required environment variable: OPENAI_API_KEY");
   }
@@ -96,43 +103,28 @@ async function generateSummary(ticket: Record<string, unknown>): Promise<Summary
     ticket: compactTicketForPrompt(ticket),
   };
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: 0.2,
-      messages: [
-        {
-          role: "system",
-          content: "You are a senior support lead. Produce concise operational summaries in strict JSON.",
-        },
-        {
-          role: "user",
-          content: JSON.stringify(prompt),
-        },
-      ],
-    }),
+  const modelCandidates = buildModelCandidates(OPENAI_MODEL, OPENAI_MODEL_FALLBACKS);
+  const completion = await requestChatCompletionWithModelFallback({
+    apiKey: OPENAI_API_KEY,
+    modelCandidates,
+    temperature: 0.2,
+    messages: [
+      {
+        role: "system",
+        content: "You are a senior support lead. Produce concise operational summaries in strict JSON.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify(prompt),
+      },
+    ],
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI request failed (${response.status}): ${text}`);
-  }
-
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string | null } }>;
+  const parsed = parseSummary(completion.content);
+  return {
+    ...parsed,
+    model: completion.model,
   };
-
-  const content = payload.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error("OpenAI returned an empty summary response.");
-  }
-
-  return parseSummary(content);
 }
 
 serve(async (req) => {
@@ -149,6 +141,8 @@ serve(async (req) => {
   }
 
   try {
+    await authorizeVirtuixRequest(req, { functionName: "summarize_ticket" });
+
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const ticketId =
       typeof body.ticket_id === "number"
@@ -182,7 +176,7 @@ serve(async (req) => {
 
     const { data: cachedSummary, error: summaryReadError } = await supabaseAdmin
       .from("ticket_summaries")
-      .select("summary_text,key_actions,next_steps,updated_at")
+      .select("summary_text,key_actions,next_steps,updated_at,model")
       .eq("ticket_id", ticketId)
       .maybeSingle();
 
@@ -199,6 +193,7 @@ serve(async (req) => {
         key_actions: cachedSummary.key_actions ?? [],
         next_steps: cachedSummary.next_steps ?? [],
         updated_at: cachedSummary.updated_at,
+        model: cachedSummary.model ?? null,
       });
     }
 
@@ -213,7 +208,7 @@ serve(async (req) => {
           summary_text: generated.summary,
           key_actions: generated.key_actions,
           next_steps: generated.next_steps,
-          model: OPENAI_MODEL,
+          model: generated.model,
           updated_at: nowIso,
         },
         { onConflict: "ticket_id" },
@@ -243,9 +238,19 @@ serve(async (req) => {
       key_actions: generated.key_actions,
       next_steps: generated.next_steps,
       updated_at: nowIso,
-      model: OPENAI_MODEL,
+      model: generated.model,
     });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          code: error.code,
+          ...(error.publicDetails ?? {}),
+        },
+        error.status,
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown summary error";
     return jsonResponse({ error: message }, 500);
   }

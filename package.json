@@ -11,9 +11,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "sync:zendesk": "bash -lc 'source .env && curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"all\\\"}\"'",
-    "sync:zendesk:omni-one": "bash -lc 'source .env && curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"omni_one\\\"}\"'",
-    "sync:zendesk:omni-arena": "bash -lc 'source .env && curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"omni_arena\\\"}\"'"
+    "sync:zendesk": "bash -lc 'set -a; source .env; set +a; TOKEN=\"${SUPABASE_FUNCTION_TOKEN:-$SUPABASE_SERVICE_ROLE_KEY}\"; if [ -z \"$TOKEN\" ]; then echo \"Missing SUPABASE_FUNCTION_TOKEN or SUPABASE_SERVICE_ROLE_KEY\"; exit 1; fi; curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"all\\\"}\"'",
+    "sync:zendesk:omni-one": "bash -lc 'set -a; source .env; set +a; TOKEN=\"${SUPABASE_FUNCTION_TOKEN:-$SUPABASE_SERVICE_ROLE_KEY}\"; if [ -z \"$TOKEN\" ]; then echo \"Missing SUPABASE_FUNCTION_TOKEN or SUPABASE_SERVICE_ROLE_KEY\"; exit 1; fi; curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"omni_one\\\"}\"'",
+    "sync:zendesk:omni-arena": "bash -lc 'set -a; source .env; set +a; TOKEN=\"${SUPABASE_FUNCTION_TOKEN:-$SUPABASE_SERVICE_ROLE_KEY}\"; if [ -z \"$TOKEN\" ]; then echo \"Missing SUPABASE_FUNCTION_TOKEN or SUPABASE_SERVICE_ROLE_KEY\"; exit 1; fi; curl -sS -i -X POST \"$VITE_SUPABASE_URL/functions/v1/sync_zendesk\" -H \"apikey: $VITE_SUPABASE_PUBLISHABLE_KEY\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d \"{\\\"brand\\\":\\\"omni_arena\\\"}\"'"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

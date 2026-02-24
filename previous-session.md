@@ -510,3 +510,93 @@ Modified (major):
   - `OPENAI_API_KEY`
   - `OPENAI_MODEL` (recommended)
   - `SLACK_WEBHOOK_URL`
+
+## Session Continuation (2026-02-24)
+
+### 1) Supabase Edge Function `Invalid JWT` Deep-Debug (Hub-triggered sync)
+- User symptom: from local dev (`127.0.0.1:8080`), `/hub` sync action returned `{"code":401,"message":"Invalid JWT"}`.
+- Confirmed frontend token claims from browser-side debug payload:
+  - `token_project_ref=ddqacivmenvlidzxxhyv`
+  - `expected_project_ref=ddqacivmenvlidzxxhyv`
+  - `token_role=authenticated`
+  - `token_expired=false`
+- Confirmed local repo config ref alignment:
+  - `.env` and `supabase/config.toml` pointed to `ddqacivmenvlidzxxhyv`.
+- Live curl probes against hosted function showed function-level auth responses when requests reached code path:
+  - no `Authorization` -> `401 auth_missing_bearer_token`
+  - malformed token -> `401 auth_invalid_or_expired_user_token`
+- Root-cause determination:
+  - Gateway JWT verification was intermittently producing `Invalid JWT` for browser-authenticated token path in this project context.
+  - Stabilization path adopted: disable gateway JWT verification per function and enforce auth in shared function code.
+
+### 2) Shared Function Auth Framework Added
+- Added `supabase/functions/_shared/auth.ts`:
+  - bearer extraction + structured `HttpError`
+  - decoded role handling (`service_role` gating)
+  - strict service-role validation (`token === SUPABASE_SERVICE_ROLE_KEY`) when allowed
+  - user token validation via `auth.getUser()`
+  - `@virtuix.com` domain restriction
+- Added `supabase/functions/_shared/auth_debug.ts`:
+  - safe auth diagnostics (header presence, token kind/prefix, claim subset, project-ref match, expiry)
+  - per-function auth debug logging.
+
+### 3) Auth Enforcement Rolled Out to All Edge Functions
+- Applied `authorizeVirtuixRequest(...)` + `HttpError` response propagation to:
+  - `sync_zendesk`
+  - `zendesk-sync`
+  - `summarize_ticket`
+  - `create_digest`
+  - `send_to_slack`
+  - `copilot_chat`
+- Result:
+  - auth failures now return explicit function JSON with correct HTTP status (not opaque gateway failure).
+
+### 4) Frontend `/hub` Invocation Hardening
+- Updated `src/pages/Hub.tsx` function call path to direct robust fetch flow:
+  - normalize and decode session access token
+  - refresh session if token near expiry
+  - hard-check token project ref vs configured `VITE_SUPABASE_URL` ref
+  - invoke function with `Authorization: Bearer <access_token>` and `apikey` headers
+  - retry once after forced refresh on auth-token errors
+  - include client auth debug snapshot in sync error surface when auth fails.
+
+### 5) Function Gateway Verification Locked Down in Config
+- Updated `supabase/config.toml`:
+  - set `verify_jwt = false` for all six active functions (`sync_zendesk`, `zendesk-sync`, `summarize_ticket`, `create_digest`, `send_to_slack`, `copilot_chat`).
+- This preserves consistent in-function auth behavior across deployments.
+
+### 6) Operator Script and Docs Updates
+- Updated `package.json` sync scripts:
+  - no longer send anon key as bearer token
+  - now require `SUPABASE_FUNCTION_TOKEN` or `SUPABASE_SERVICE_ROLE_KEY`.
+- Updated README:
+  - added edge auth baseline + rollout checklist
+  - added OpenAI model/fallback secret guidance
+  - documented new operator env usage for CLI probes.
+
+### 7) Verification Executed
+- Live auth smoke tests run across all six functions:
+  - no-auth requests return HTTP 401 with `auth_missing_bearer_token`
+  - invalid bearer returns HTTP 401 with `auth_invalid_or_expired_user_token`.
+- Local checks:
+  - `npm run test` passed
+  - `npm run build` passed.
+- User validation:
+  - sync from Hub reported as working after auth changes.
+
+### 8) Remaining Summary Failure Fixed (`model_not_found`)
+- User-reported error:
+  - OpenAI 404 `model_not_found` for `gpt-4o-mini`.
+- Added `supabase/functions/_shared/openai_chat.ts`:
+  - model candidate resolution
+  - automatic retry on `404` / `model_not_found` / access-denied model errors
+  - returns actual model used.
+- Updated:
+  - `summarize_ticket` to use fallback helper and persist/report actual model
+  - `copilot_chat` to use same fallback helper.
+- Set secrets in project:
+  - `OPENAI_MODEL="gpt-4.1-mini"`
+  - `OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o"`
+- Deployed updated functions:
+  - `summarize_ticket`
+  - `copilot_chat`.

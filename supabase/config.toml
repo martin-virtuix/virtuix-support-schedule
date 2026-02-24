@@ -1,1 +1,19 @@
 project_id = "ddqacivmenvlidzxxhyv"
+
+[functions.sync_zendesk]
+verify_jwt = false
+
+[functions.zendesk-sync]
+verify_jwt = false
+
+[functions.summarize_ticket]
+verify_jwt = false
+
+[functions.create_digest]
+verify_jwt = false
+
+[functions.send_to_slack]
+verify_jwt = false
+
+[functions.copilot_chat]
+verify_jwt = false

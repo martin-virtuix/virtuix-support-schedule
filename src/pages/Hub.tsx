@@ -27,6 +27,8 @@ import omniArenaLogo from "@/assets/omniarena-logo.png";
 import omniOneLogo from "@/assets/omnione_logo_color.png";
 
 const ALLOWED_DOMAIN = "@virtuix.com";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 type SyncSummary = {
   finishedAt: string | null;
@@ -54,6 +56,28 @@ type TableProps = {
   onOpenTicket: (ticket: Ticket) => void;
   onGenerateDigest: (request: DigestRequest) => Promise<void>;
   generatingDigest: boolean;
+};
+
+type JwtClaims = {
+  iss?: unknown;
+  aud?: unknown;
+  exp?: unknown;
+  sub?: unknown;
+  ref?: unknown;
+  role?: unknown;
+};
+
+type AccessTokenContext = {
+  token: string;
+  claims: JwtClaims;
+};
+
+type ClientAuthDebug = {
+  token_prefix: string | null;
+  token_project_ref: string | null;
+  token_role: string | null;
+  expected_project_ref: string | null;
+  token_expired: boolean | null;
 };
 
 function isAllowedEmail(email?: string | null): boolean {
@@ -106,8 +130,13 @@ async function extractFunctionErrorMessage(error: unknown): Promise<string> {
     if (typeof response.json === "function") {
       try {
         const body = await response.json();
-        if (body && typeof body === "object" && "error" in body && typeof (body as { error?: unknown }).error === "string") {
-          return (body as { error: string }).error;
+        if (body && typeof body === "object") {
+          if ("error" in body && typeof (body as { error?: unknown }).error === "string") {
+            return (body as { error: string }).error;
+          }
+          if ("message" in body && typeof (body as { message?: unknown }).message === "string") {
+            return (body as { message: string }).message;
+          }
         }
       } catch {
         // Fallback below.
@@ -118,23 +147,181 @@ async function extractFunctionErrorMessage(error: unknown): Promise<string> {
   return fallback;
 }
 
-function isInvalidJwtMessage(message: string): boolean {
-  return message.toLowerCase().includes("invalid jwt");
+function isAuthTokenErrorMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return [
+    "invalid jwt",
+    "invalid or expired user token",
+    "missing authorization header",
+    "auth_invalid_or_expired_user_token",
+    "jwt expired",
+  ].some((needle) => normalized.includes(needle));
 }
 
-async function invokeFunctionWithAnonKeyFallback<T>(name: string, body: Record<string, unknown>): Promise<T> {
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+function decodeJwtClaims(token: string): JwtClaims | null {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
 
-  if (!url || !anonKey) {
+  try {
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = atob(`${normalized}${padding}`);
+    return JSON.parse(decoded) as JwtClaims;
+  } catch {
+    return null;
+  }
+}
+
+function extractProjectRefFromSupabaseUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const ref = parsed.hostname.split(".")[0];
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
+
+function extractProjectRefFromIssuer(issuer: unknown): string | null {
+  if (typeof issuer !== "string" || issuer.trim().length === 0 || issuer === "supabase") {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(issuer);
+    const ref = parsed.hostname.split(".")[0];
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
+
+function extractProjectRefFromClaims(claims: JwtClaims): string | null {
+  if (typeof claims.ref === "string" && claims.ref.trim().length > 0) {
+    return claims.ref;
+  }
+  return extractProjectRefFromIssuer(claims.iss);
+}
+
+function getJwtExp(claims: JwtClaims): number | null {
+  if (typeof claims.exp === "number") return claims.exp;
+  if (typeof claims.exp === "string") {
+    const parsed = Number.parseInt(claims.exp, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeAccessToken(rawToken: string): string {
+  let token = rawToken.trim();
+  if (token.toLowerCase().startsWith("bearer ")) {
+    token = token.slice(7).trim();
+  }
+  if (
+    (token.startsWith("\"") && token.endsWith("\"")) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    token = token.slice(1, -1).trim();
+  }
+  return token;
+}
+
+function tokenNeedsRefreshSoon(claims: JwtClaims, skewSeconds = 45): boolean {
+  const exp = getJwtExp(claims);
+  if (!exp) return false;
+  return exp <= Math.floor(Date.now() / 1000) + skewSeconds;
+}
+
+async function getSessionAccessTokenContext(forceRefresh = false): Promise<AccessTokenContext> {
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     throw new Error("Supabase URL or publishable key is missing in frontend env.");
   }
 
-  const response = await fetch(`${url}/functions/v1/${name}`, {
+  const sessionData = await supabase.auth.getSession();
+  if (sessionData.error) {
+    throw new Error(`Unable to read auth session: ${sessionData.error.message}`);
+  }
+
+  let session = sessionData.data.session;
+
+  if (forceRefresh || !session?.access_token) {
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.error || !refreshed.data.session?.access_token) {
+      throw new Error("Unable to refresh auth session. Please sign in again.");
+    }
+    session = refreshed.data.session;
+  }
+
+  let normalizedToken = normalizeAccessToken(session.access_token);
+  let claims = decodeJwtClaims(normalizedToken);
+  if (!claims) {
+    throw new Error("Session access token is malformed. Please sign in again.");
+  }
+
+  if (!forceRefresh && tokenNeedsRefreshSoon(claims)) {
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.error || !refreshed.data.session?.access_token) {
+      throw new Error("Session refresh failed. Please sign in again.");
+    }
+
+    session = refreshed.data.session;
+    normalizedToken = normalizeAccessToken(session.access_token);
+    claims = decodeJwtClaims(normalizedToken);
+    if (!claims) {
+      throw new Error("Refreshed access token is malformed. Please sign in again.");
+    }
+  }
+
+  const expectedRef = extractProjectRefFromSupabaseUrl(SUPABASE_URL);
+  const tokenRef = extractProjectRefFromClaims(claims);
+  if (expectedRef && tokenRef && tokenRef !== expectedRef) {
+    await supabase.auth.signOut();
+    throw new Error(
+      `Session token belongs to project ${tokenRef}, but app is configured for ${expectedRef}. Sign in again.`,
+    );
+  }
+
+  return { token: normalizedToken, claims };
+}
+
+async function getClientAuthDebugSnapshot(): Promise<ClientAuthDebug> {
+  try {
+    const auth = await getSessionAccessTokenContext(false);
+    return {
+      token_prefix: auth.token.slice(0, 20),
+      token_project_ref: extractProjectRefFromClaims(auth.claims),
+      token_role: typeof auth.claims.role === "string" ? auth.claims.role : null,
+      expected_project_ref: extractProjectRefFromSupabaseUrl(SUPABASE_URL),
+      token_expired: tokenNeedsRefreshSoon(auth.claims, 0),
+    };
+  } catch {
+    return {
+      token_prefix: null,
+      token_project_ref: null,
+      token_role: null,
+      expected_project_ref: extractProjectRefFromSupabaseUrl(SUPABASE_URL),
+      token_expired: null,
+    };
+  }
+}
+
+async function invokeFunctionWithAccessTokenFallback<T>(
+  name: string,
+  body: Record<string, unknown>,
+  token: string,
+): Promise<T> {
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    throw new Error("Supabase URL or publishable key is missing in frontend env.");
+  }
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
     method: "POST",
     headers: {
-      apikey: anonKey,
-      Authorization: `Bearer ${anonKey}`,
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -705,42 +892,23 @@ export default function Hub() {
 
   const inDigestRoute = location.pathname === "/hub/digests";
 
-  async function invokeFunctionWithAuthRetry<T>(name: string, body: Record<string, unknown>) {
-    let result = await supabase.functions.invoke<T>(name, { method: "POST", body });
-    if (!result.error) {
-      return result;
-    }
-
-    const firstMessage = await extractFunctionErrorMessage(result.error);
-    if (!isInvalidJwtMessage(firstMessage)) {
-      return result;
-    }
-
-    const { error: refreshError } = await supabase.auth.refreshSession();
-    if (refreshError) {
-      return result;
-    }
-
-    result = await supabase.functions.invoke<T>(name, { method: "POST", body });
-    return result;
-  }
-
   async function invokeFunctionRobust<T>(name: string, body: Record<string, unknown>): Promise<T> {
-    const primary = await invokeFunctionWithAuthRetry<T>(name, body);
-    if (!primary.error) {
-      if (primary.data === null || primary.data === undefined) {
-        throw new Error(`Function ${name} returned an empty payload.`);
-      }
-      return primary.data;
-    }
-
-    const primaryMessage = await extractFunctionErrorMessage(primary.error);
     try {
-      return await invokeFunctionWithAnonKeyFallback<T>(name, body);
-    } catch (fallbackError) {
-      const fallbackMessage =
-        fallbackError instanceof Error ? fallbackError.message : "Unknown fallback error.";
-      throw new Error(`${primaryMessage} | Fallback failed: ${fallbackMessage}`);
+      const auth = await getSessionAccessTokenContext(false);
+      return await invokeFunctionWithAccessTokenFallback<T>(name, body, auth.token);
+    } catch (primaryError) {
+      const primaryMessage = primaryError instanceof Error ? primaryError.message : "Unknown function error.";
+      if (!isAuthTokenErrorMessage(primaryMessage)) {
+        throw primaryError instanceof Error ? primaryError : new Error(primaryMessage);
+      }
+
+      try {
+        const retryAuth = await getSessionAccessTokenContext(true);
+        return await invokeFunctionWithAccessTokenFallback<T>(name, body, retryAuth.token);
+      } catch (retryError) {
+        const retryMessage = retryError instanceof Error ? retryError.message : "Unknown retry error.";
+        throw new Error(`${primaryMessage} | Retry failed: ${retryMessage}`);
+      }
     }
   }
 
@@ -1023,8 +1191,13 @@ export default function Hub() {
       data = await invokeFunctionRobust<SyncZendeskResponse>("sync_zendesk", { brand: "all" });
     } catch (error) {
       const details = error instanceof Error ? error.message : "Unknown sync error.";
-      setSyncMessage(`Sync failed: ${details}`);
-      toast({ title: "Sync failed", description: details, variant: "destructive" });
+      let enriched = details;
+      if (isAuthTokenErrorMessage(details)) {
+        const debug = await getClientAuthDebugSnapshot();
+        enriched = `${details} | client_auth=${JSON.stringify(debug)}`;
+      }
+      setSyncMessage(`Sync failed: ${enriched}`);
+      toast({ title: "Sync failed", description: enriched, variant: "destructive" });
       setSyncLoading(false);
       return;
     }

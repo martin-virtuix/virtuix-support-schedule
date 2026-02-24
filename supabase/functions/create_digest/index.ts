@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authorizeVirtuixRequest, HttpError } from "../_shared/auth.ts";
 
 type TicketRow = {
   ticket_id: number;
@@ -123,6 +124,8 @@ serve(async (req) => {
   }
 
   try {
+    await authorizeVirtuixRequest(req, { functionName: "create_digest" });
+
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const title = typeof body.title === "string" && body.title.trim().length > 0
       ? body.title.trim()
@@ -212,6 +215,16 @@ serve(async (req) => {
       ticket_count: ticketRows.length,
     });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          code: error.code,
+          ...(error.publicDetails ?? {}),
+        },
+        error.status,
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown digest error";
     return jsonResponse({ error: message }, 500);
   }

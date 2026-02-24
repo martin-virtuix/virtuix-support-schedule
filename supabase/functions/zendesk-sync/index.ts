@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authorizeVirtuixRequest, HttpError } from "../_shared/auth.ts";
 
 type BrandFilter = "all" | "omni_one" | "omni_arena";
 
@@ -161,6 +162,23 @@ serve(async (req) => {
   const missingEnv = getMissingEnvVars();
   if (missingEnv.length > 0) {
     return jsonResponse({ error: `Missing required environment variables: ${missingEnv.join(", ")}` }, 500);
+  }
+
+  try {
+    await authorizeVirtuixRequest(req, { allowServiceRole: true, functionName: "zendesk-sync" });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          code: error.code,
+          ...(error.publicDetails ?? {}),
+        },
+        error.status,
+      );
+    }
+    const message = error instanceof Error ? error.message : "Auth validation failed.";
+    return jsonResponse({ error: message }, 500);
   }
 
   const supabaseAdmin = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {

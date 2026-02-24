@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { authorizeVirtuixRequest, HttpError } from "../_shared/auth.ts";
+import { buildModelCandidates, requestChatCompletionWithModelFallback } from "../_shared/openai_chat.ts";
 
 type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -18,7 +20,8 @@ const corsHeaders = {
 };
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL");
+const OPENAI_MODEL_FALLBACKS = Deno.env.get("OPENAI_MODEL_FALLBACKS");
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -55,11 +58,13 @@ serve(async (req) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  if (!OPENAI_API_KEY) {
-    return jsonResponse({ error: "Missing OPENAI_API_KEY secret." }, 500);
-  }
-
   try {
+    await authorizeVirtuixRequest(req, { functionName: "copilot_chat" });
+
+    if (!OPENAI_API_KEY) {
+      return jsonResponse({ error: "Missing OPENAI_API_KEY secret." }, 500);
+    }
+
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const messages = normalizeMessages(body.messages);
     const context = (typeof body.context === "object" && body.context !== null ? body.context : {}) as ChatContext;
@@ -76,42 +81,33 @@ serve(async (req) => {
       `Current context: omni_one=${context.omni_one_ticket_count ?? "unknown"}, omni_arena=${context.omni_arena_ticket_count ?? "unknown"}, digests=${context.digest_count ?? "unknown"}`,
     ].join(" ");
 
-    const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        temperature: 0.25,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-        ],
-      }),
+    const modelCandidates = buildModelCandidates(OPENAI_MODEL, OPENAI_MODEL_FALLBACKS);
+    const completion = await requestChatCompletionWithModelFallback({
+      apiKey: OPENAI_API_KEY,
+      modelCandidates,
+      temperature: 0.25,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
     });
-
-    if (!openAiResponse.ok) {
-      const text = await openAiResponse.text();
-      return jsonResponse({ error: `OpenAI request failed (${openAiResponse.status}): ${text}` }, 500);
-    }
-
-    const payload = await openAiResponse.json() as {
-      choices?: Array<{ message?: { content?: string | null } }>;
-    };
-
-    const reply = payload.choices?.[0]?.message?.content?.trim();
-    if (!reply) {
-      return jsonResponse({ error: "Empty response from model." }, 500);
-    }
 
     return jsonResponse({
       ok: true,
-      reply,
-      model: OPENAI_MODEL,
+      reply: completion.content,
+      model: completion.model,
     });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          code: error.code,
+          ...(error.publicDetails ?? {}),
+        },
+        error.status,
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown copilot error";
     return jsonResponse({ error: message }, 500);
   }

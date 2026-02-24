@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authorizeVirtuixRequest, HttpError } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +10,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const SLACK_WEBHOOK_URL = Deno.env.get("SLACK_WEBHOOK_URL");
+const SLACK_WEBHOOK_URL = Deno.env.get("SLACK_WEBHOOK_URL") ?? Deno.env.get("SLACk_WEBHOOK_URL");
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -52,6 +53,8 @@ serve(async (req) => {
   }
 
   try {
+    await authorizeVirtuixRequest(req, { functionName: "send_to_slack" });
+
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const type = typeof body.type === "string" ? body.type : "";
 
@@ -152,6 +155,16 @@ serve(async (req) => {
 
     return jsonResponse({ error: "Unsupported payload. Provide type=digest or type=ticket_summary." }, 400);
   } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          code: error.code,
+          ...(error.publicDetails ?? {}),
+        },
+        error.status,
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown Slack send error";
     return jsonResponse({ error: message }, 500);
   }
