@@ -14,6 +14,182 @@ export type Database = {
   }
   public: {
     Tables: {
+      digest_tickets: {
+        Row: {
+          created_at: string
+          digest_id: string
+          ticket_id: number
+        }
+        Insert: {
+          created_at?: string
+          digest_id: string
+          ticket_id: number
+        }
+        Update: {
+          created_at?: string
+          digest_id?: string
+          ticket_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "digest_tickets_digest_id_fkey"
+            columns: ["digest_id"]
+            isOneToOne: false
+            referencedRelation: "digests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "digest_tickets_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "ticket_cache"
+            referencedColumns: ["ticket_id"]
+          },
+        ]
+      }
+      digests: {
+        Row: {
+          content_markdown: string
+          content_table: Json
+          created_at: string
+          created_by: string | null
+          filters: Json
+          id: string
+          source: string
+          ticket_ids: number[]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content_markdown: string
+          content_table?: Json
+          created_at?: string
+          created_by?: string | null
+          filters?: Json
+          id?: string
+          source?: string
+          ticket_ids?: number[]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content_markdown?: string
+          content_table?: Json
+          created_at?: string
+          created_by?: string | null
+          filters?: Json
+          id?: string
+          source?: string
+          ticket_ids?: number[]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ticket_cache: {
+        Row: {
+          assignee_email: string | null
+          brand: string
+          created_at: string
+          id: string
+          priority: string | null
+          raw_payload: Json
+          requester_email: string | null
+          requester_name: string | null
+          status: string
+          subject: string
+          summary_text: string | null
+          summary_updated_at: string | null
+          synced_at: string
+          ticket_id: number
+          ticket_url: string | null
+          updated_at: string
+          zendesk_created_at: string | null
+          zendesk_updated_at: string | null
+        }
+        Insert: {
+          assignee_email?: string | null
+          brand?: string
+          created_at?: string
+          id?: string
+          priority?: string | null
+          raw_payload?: Json
+          requester_email?: string | null
+          requester_name?: string | null
+          status?: string
+          subject?: string
+          summary_text?: string | null
+          summary_updated_at?: string | null
+          synced_at?: string
+          ticket_id: number
+          ticket_url?: string | null
+          updated_at?: string
+          zendesk_created_at?: string | null
+          zendesk_updated_at?: string | null
+        }
+        Update: {
+          assignee_email?: string | null
+          brand?: string
+          created_at?: string
+          id?: string
+          priority?: string | null
+          raw_payload?: Json
+          requester_email?: string | null
+          requester_name?: string | null
+          status?: string
+          subject?: string
+          summary_text?: string | null
+          summary_updated_at?: string | null
+          synced_at?: string
+          ticket_id?: number
+          ticket_url?: string | null
+          updated_at?: string
+          zendesk_created_at?: string | null
+          zendesk_updated_at?: string | null
+        }
+        Relationships: []
+      }
+      ticket_summaries: {
+        Row: {
+          created_at: string
+          id: string
+          key_actions: Json
+          model: string | null
+          next_steps: Json
+          summary_text: string
+          ticket_id: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key_actions?: Json
+          model?: string | null
+          next_steps?: Json
+          summary_text: string
+          ticket_id: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key_actions?: Json
+          model?: string | null
+          next_steps?: Json
+          summary_text?: string
+          ticket_id?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_summaries_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: true
+            referencedRelation: "ticket_cache"
+            referencedColumns: ["ticket_id"]
+          },
+        ]
+      }
       time_off_requests: {
         Row: {
           approval_token: string

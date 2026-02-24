@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ticket Queue Triage"
+  short_description: "Prioritize Zendesk queues and SLA-driven actions"
+  default_prompt: "Use this skill to triage Omni One and Omni Arena ticket queues, prioritize action items, and produce a clear operator run plan."

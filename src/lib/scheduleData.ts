@@ -1,3 +1,5 @@
+import Papa from "papaparse";
+
 // CSV URLs for schedule data
 export const CURRENT_WEEK_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_P-MDtJ5_22Dftrk9JC9gQmaWzIM_YLBVEJ7n_hyU4bm4PSgzUbWOdIB-e184eJpaL2SUqB92tumS/pub?gid=0&single=true&output=csv";
@@ -21,65 +23,12 @@ export interface ArenaSite {
   primaryContact: string;
 }
 
-type ArenaSiteCsvRow = {
+type SitesCsvRow = {
   Name?: string;
   "Current Quarter Status"?: string;
   Notes?: string;
   "Main Contact"?: string;
 };
-
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let value = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === "\"" && inQuotes && next === "\"") {
-      value += "\"";
-      i++;
-      continue;
-    }
-
-    if (char === "\"") {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      result.push(value.trim());
-      value = "";
-      continue;
-    }
-
-    value += char;
-  }
-
-  result.push(value.trim());
-  return result;
-}
-
-function parseArenaSitesCSV(csvText: string): ArenaSiteCsvRow[] {
-  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) {
-    return [];
-  }
-
-  const headers = parseCsvLine(lines[0]);
-
-  return lines.slice(1).map((line) => {
-    const values = parseCsvLine(line);
-    const row: Record<string, string> = {};
-
-    headers.forEach((header, index) => {
-      row[header] = values[index] ?? "";
-    });
-
-    return row as ArenaSiteCsvRow;
-  });
-}
 
 export function parseExcludedSitesCSV(text: string): ExcludedSite[] {
   const lines = text.trim().split(/\r?\n/);
@@ -117,9 +66,12 @@ export async function getArenaSites(): Promise<ArenaSite[]> {
   }
 
   const csvText = await res.text();
-  const rows = parseArenaSitesCSV(csvText);
+  const parsed = Papa.parse<SitesCsvRow>(csvText, {
+    header: true,
+    skipEmptyLines: true,
+  });
 
-  return rows
+  return (parsed.data || [])
     .map((row) => ({
       venueName: (row.Name ?? "").trim(),
       currentQuarterStatus: (row["Current Quarter Status"] ?? "").trim(),

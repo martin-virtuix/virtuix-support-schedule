@@ -1,73 +1,256 @@
-# Welcome to your Lovable project
+# Virtuix Support Schedule + Support Hub
 
-## Project info
+A Vite/React app with two experiences:
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+- Public schedule page (`/`) for weekly Omni support coverage.
+- Private Support Hub (`/hub`) for Virtuix employees, including Zendesk ticket operations and Arena sites data.
 
-## How can I edit this code?
+## Current Scope
 
-There are several ways of editing your application.
+### Public (`/`)
+- Displays current and next week support schedules.
+- Uses Google Sheets CSV as source of truth.
+- Includes login CTA to the private Hub.
 
-**Use Lovable**
+### Private Hub (`/hub`)
+- Supabase Auth sign-in flow (email OTP), restricted to `@virtuix.com` users in app logic and DB RLS read policies.
+- Two Zendesk-backed ticket tables:
+  - Omni One tickets
+  - Omni Arena tickets
+- Features:
+  - Status filters (`all`, `open`, `pending`, `new`)
+  - Status badge colors (Zendesk-like)
+  - Requester column
+  - Ticket links to Zendesk agent view
+  - Scrollable tables with sticky headers
+- Arena Sites table with filters/search/sort and sticky-header scrolling.
+- `Sync now` button triggers Zendesk sync function and refreshes Hub data.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Tech Stack
 
-Changes made via Lovable will be committed automatically to this repo.
+- React 18 + TypeScript
+- Vite 5
+- Tailwind CSS + shadcn/Radix UI
+- Supabase (Postgres, Auth, Edge Functions)
 
-**Use your preferred IDE**
+## Data Sources
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- Schedule and sites CSVs: Google Sheets published CSV URLs (see `src/lib/scheduleData.ts`).
+- Hub tickets: `public.zendesk_tickets` (synced from Zendesk API via edge function).
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## Zendesk Sync Pipeline
 
-Follow these steps:
+### Function
+- Edge function: `supabase/functions/zendesk-sync/index.ts`
+- Pulls Zendesk incremental tickets API.
+- Upserts into `public.zendesk_tickets`.
+- Writes run metadata/errors to `public.zendesk_sync_runs`.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Scheduling
+- Automatic cron job every 5 minutes (DB migration-managed).
+- Manual sync available via Hub `Sync now` button.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### Reliability
+- Retry/backoff on Zendesk `429` and `5xx`.
+- Overlap protection:
+  - DB constraint allows only one `running` sync at a time.
+  - Function returns `202 skipped` if a run is already in progress.
 
-# Step 3: Install the necessary dependencies.
-npm i
+## Supabase Project
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+Configured project ref:
+
+- `ddqacivmenvlidzxxhyv` (see `supabase/config.toml`)
+
+## Required Environment Variables
+
+### Frontend (`.env`)
+
+```bash
+VITE_SUPABASE_PROJECT_ID="ddqacivmenvlidzxxhyv"
+VITE_SUPABASE_URL="https://ddqacivmenvlidzxxhyv.supabase.co"
+VITE_SUPABASE_PUBLISHABLE_KEY="<supabase-anon-key>"
+```
+
+Optional (only for Zendesk link fallback in UI):
+
+```bash
+VITE_ZENDESK_SUBDOMAIN="<your-subdomain>"
+```
+
+Optional for CLI edge-function probes (`npm run sync:zendesk*`):
+
+```bash
+# Preferred for operator scripts
+SUPABASE_SERVICE_ROLE_KEY="<service-role-jwt>"
+
+# Alternative override when testing with a user JWT
+SUPABASE_FUNCTION_TOKEN="<access-token-jwt>"
+```
+
+### Supabase Edge Function Secrets
+
+Set in Supabase (not in `.env`):
+
+```bash
+ZENDESK_SUBDOMAIN
+ZENDESK_EMAIL
+ZENDESK_API_TOKEN
+ZENDESK_OMNI_ARENA_BRAND_ID=360007126832
+ZENDESK_OMNI_ONE_BRAND_ID=26871345286541
+```
+
+## Local Development
+
+### Prerequisites
+- Node.js 18+
+- npm
+- Supabase CLI (for migrations/functions workflow)
+
+### Install + Run
+
+```bash
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+By default this project is configured to run Vite on:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+- `http://127.0.0.1:8080`
 
-**Use GitHub Codespaces**
+If port `8080` is in use, Vite auto-selects the next available port.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Scripts
 
-## What technologies are used for this project?
+```bash
+npm run dev        # Start dev server
+npm run build      # Production build
+npm run test       # Run tests
+npm run lint       # Lint code
+npm run preview    # Preview built app
+```
 
-This project is built with:
+## Supabase Workflow
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Apply migrations
 
-## How can I deploy this project?
+```bash
+npx supabase db push
+```
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+### Deploy function
 
-## Can I connect a custom domain to my Lovable project?
+```bash
+npx supabase functions deploy zendesk-sync
+```
 
-Yes, you can!
+### New Edge Functions (Copilot + Digest)
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+Deploy the new functions:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+```bash
+npx supabase functions deploy sync_zendesk
+npx supabase functions deploy summarize_ticket
+npx supabase functions deploy create_digest
+npx supabase functions deploy send_to_slack
+npx supabase functions deploy copilot_chat
+```
+
+### Edge Function Auth Baseline (prevents `Invalid JWT` gateway failures)
+
+This project now standardizes auth in function code (not gateway JWT enforcement):
+
+- `supabase/config.toml` sets `verify_jwt = false` for:
+  - `sync_zendesk`
+  - `zendesk-sync`
+  - `summarize_ticket`
+  - `create_digest`
+  - `send_to_slack`
+  - `copilot_chat`
+- Each function validates bearer tokens with shared helper:
+  - `supabase/functions/_shared/auth.ts`
+  - `supabase/functions/_shared/auth_debug.ts`
+- Frontend calls functions with the current user access token from session (`Authorization: Bearer <access_token>`).
+
+Rollout checklist for any new function:
+
+1. Add `[functions.<name>] verify_jwt = false` in `supabase/config.toml`.
+2. In the function, call `authorizeVirtuixRequest(req, { functionName: "<name>" })` (or `allowServiceRole: true` only where needed).
+3. Return `HttpError.status` directly (never wrap auth failures in 200).
+4. Deploy function after changes.
+5. Validate with one unauthenticated request (expect 401 from function JSON) and one authenticated request (expect 200).
+
+Required function secrets:
+
+```bash
+# Zendesk sync
+ZENDESK_SUBDOMAIN
+ZENDESK_EMAIL
+ZENDESK_API_TOKEN
+ZENDESK_OMNI_ARENA_BRAND_ID
+ZENDESK_OMNI_ONE_BRAND_ID
+
+# AI ticket summarization
+OPENAI_API_KEY
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL_FALLBACKS=gpt-4o-mini,gpt-4.1,gpt-4o
+
+# Slack delivery
+SLACK_WEBHOOK_URL
+```
+
+Set or update secrets:
+
+```bash
+npx supabase secrets set \
+  ZENDESK_SUBDOMAIN="<subdomain>" \
+  ZENDESK_EMAIL="<email>" \
+  ZENDESK_API_TOKEN="<token>" \
+  ZENDESK_OMNI_ARENA_BRAND_ID="360007126832" \
+  ZENDESK_OMNI_ONE_BRAND_ID="26871345286541" \
+  OPENAI_API_KEY="<openai-key>" \
+  OPENAI_MODEL="gpt-4.1-mini" \
+  OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o" \
+  SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>"
+```
+
+Apply schema updates for copilot/digest tables:
+
+```bash
+npx supabase db push
+```
+
+## Routing
+
+- `/` → public schedule page
+- `/hub` → private support hub (auth required)
+
+## Project Structure (key files)
+
+- `src/pages/Index.tsx` — public schedule UI
+- `src/pages/Hub.tsx` — private Hub UI + sync action
+- `src/components/schedule/ScheduleTable.tsx` — schedule table
+- `src/components/schedule/ArenaSitesTable.tsx` — Arena sites table
+- `src/lib/scheduleData.ts` — CSV parsing/loading
+- `src/integrations/supabase/client.ts` — frontend Supabase client
+- `supabase/migrations/*` — DB schema, RLS, cron, protections
+- `supabase/functions/zendesk-sync/index.ts` — Zendesk ingest function
+
+## Troubleshooting
+
+### `npm run dev` fails with `EPERM ... 8080`
+- Usually environment permission/port issue.
+- Ensure no conflicting process is bound to `8080`, or let Vite use next port.
+
+### `Failed to resolve import "papaparse"`
+- Run `npm install` in repo root.
+
+### Sync error in Hub
+- Check latest run logs:
+
+```sql
+select started_at, finished_at, status, tickets_fetched, tickets_upserted, error_message
+from public.zendesk_sync_runs
+order by started_at desc
+limit 20;
+```

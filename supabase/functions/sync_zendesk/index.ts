@@ -16,6 +16,7 @@ type ZendeskTicket = {
   priority?: string | null;
   requester?: {
     email?: string | null;
+    name?: string | null;
   } | null;
   assignee?: {
     email?: string | null;
@@ -23,6 +24,7 @@ type ZendeskTicket = {
   brand_id?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  url?: string | null;
   [key: string]: unknown;
 };
 
@@ -93,6 +95,16 @@ function getRetryAfterMs(retryAfterHeader: string | null): number | null {
   return null;
 }
 
+function buildTicketUrl(apiUrl: string | null | undefined, ticketNumber: number): string | null {
+  if (!apiUrl) return null;
+  try {
+    const parsed = new URL(apiUrl);
+    return `${parsed.protocol}//${parsed.host}/agent/tickets/${ticketNumber}`;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchZendeskWithRetry(url: string, authHeader: string): Promise<Response> {
   const maxAttempts = 5;
 
@@ -155,7 +167,10 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  if (!["GET", "POST"].includes(req.method)) {
+  if (![
+    "GET",
+    "POST",
+  ].includes(req.method)) {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
@@ -165,7 +180,7 @@ serve(async (req) => {
   }
 
   try {
-    await authorizeVirtuixRequest(req, { allowServiceRole: true, functionName: "zendesk-sync" });
+    await authorizeVirtuixRequest(req, { allowServiceRole: true, functionName: "sync_zendesk" });
   } catch (error) {
     if (error instanceof HttpError) {
       return jsonResponse(
@@ -190,7 +205,7 @@ serve(async (req) => {
   let runId: string | null = null;
   let fetchedCount = 0;
   let upsertedCount = 0;
-  let skipDueToRunning = false;
+  const staleRunThresholdMs = 20 * 60 * 1000;
 
   try {
     let cursor = options.startTime;
@@ -212,6 +227,44 @@ serve(async (req) => {
       cursor = lastRun?.cursor ?? Math.floor(Date.now() / 1000) - 60 * 60;
     }
 
+    const { data: runningRun, error: runningRunError } = await supabaseAdmin
+      .from("zendesk_sync_runs")
+      .select("id,started_at")
+      .eq("status", "running")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (runningRunError) {
+      throw new Error(`Failed to check existing running sync: ${runningRunError.message}`);
+    }
+
+    if (runningRun?.id) {
+      const startedAt = new Date(runningRun.started_at);
+      const ageMs = Number.isNaN(startedAt.getTime()) ? 0 : Date.now() - startedAt.getTime();
+
+      if (ageMs > staleRunThresholdMs) {
+        const { error: staleUpdateError } = await supabaseAdmin
+          .from("zendesk_sync_runs")
+          .update({
+            status: "error",
+            finished_at: new Date().toISOString(),
+            error_message: "Recovered stale running lock before starting new sync_zendesk run.",
+          })
+          .eq("id", runningRun.id);
+
+        if (staleUpdateError) {
+          throw new Error(`Failed to recover stale running sync: ${staleUpdateError.message}`);
+        }
+      } else {
+        return jsonResponse({
+          ok: true,
+          skipped: true,
+          reason: "A sync_zendesk run is already in progress.",
+        });
+      }
+    }
+
     const { data: runData, error: runInsertError } = await supabaseAdmin
       .from("zendesk_sync_runs")
       .insert({
@@ -223,23 +276,14 @@ serve(async (req) => {
       .single();
 
     if (runInsertError) {
-      // Unique partial index blocks concurrent "running" runs.
       if (runInsertError.code === "23505") {
-        skipDueToRunning = true;
-      } else {
-        throw new Error(`Failed to create sync run record: ${runInsertError.message}`);
-      }
-    }
-
-    if (skipDueToRunning) {
-      return jsonResponse(
-        {
+        return jsonResponse({
           ok: true,
           skipped: true,
-          reason: "A zendesk-sync run is already in progress.",
-        },
-        202,
-      );
+          reason: "A sync_zendesk run is already in progress.",
+        });
+      }
+      throw new Error(`Failed to create sync run record: ${runInsertError.message}`);
     }
 
     if (!runData?.id) {
@@ -270,25 +314,24 @@ serve(async (req) => {
       fetchedCount += filteredTickets.length;
 
       if (filteredTickets.length > 0) {
-        const upsertRows = filteredTickets.map((ticket) => {
-          const mappedBrand = mapBrand(ticket.brand_id);
-          return {
-            ticket_id: ticket.id,
-            brand: mappedBrand,
-            subject: ticket.subject ?? "",
-            status: ticket.status ?? "new",
-            priority: ticket.priority,
-            requester_email: ticket.requester?.email,
-            assignee_email: ticket.assignee?.email,
-            zendesk_created_at: ticket.created_at,
-            zendesk_updated_at: ticket.updated_at,
-            raw_payload: ticket,
-            synced_at: new Date().toISOString(),
-          };
-        });
+        const upsertRows = filteredTickets.map((ticket) => ({
+          ticket_id: ticket.id,
+          brand: mapBrand(ticket.brand_id),
+          subject: ticket.subject ?? "",
+          status: ticket.status ?? "new",
+          priority: ticket.priority,
+          requester_email: ticket.requester?.email,
+          requester_name: ticket.requester?.name,
+          assignee_email: ticket.assignee?.email,
+          zendesk_created_at: ticket.created_at,
+          zendesk_updated_at: ticket.updated_at,
+          ticket_url: buildTicketUrl(ticket.url, ticket.id),
+          raw_payload: ticket,
+          synced_at: new Date().toISOString(),
+        }));
 
         const { error: upsertError } = await supabaseAdmin
-          .from("zendesk_tickets")
+          .from("ticket_cache")
           .upsert(upsertRows, { onConflict: "ticket_id" });
 
         if (upsertError) {
@@ -342,6 +385,6 @@ serve(async (req) => {
         .eq("id", runId);
     }
 
-    return jsonResponse({ ok: false, error: message }, 500);
+    return jsonResponse({ error: message }, 500);
   }
 });

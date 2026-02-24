@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zendesk Sync Operations"
+  short_description: "Operate and recover the Zendesk sync pipeline"
+  default_prompt: "Use this skill to monitor, diagnose, and recover the zendesk-sync pipeline in Supabase while minimizing data staleness."

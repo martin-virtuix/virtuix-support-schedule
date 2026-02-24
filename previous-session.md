@@ -295,3 +295,308 @@ Modified (major):
   - Sticky table header enabled.
 - Ticket table polish:
   - Status badges styled as Zendesk-like pills (`new` yellow, `open` red, `pending` blue).
+
+## Addendum: Deployment/Auth/Runtime Stabilization (same session continuation)
+
+### 1) Runtime + Build Failure Debug (Local + Cloudflare)
+- Identified root cause for blank localhost and failed build/deploy:
+  - `src/lib/scheduleData.ts` had duplicate merge artifacts (duplicate `ArenaSite` + duplicate `getArenaSites()` exports).
+- Cleaned `src/lib/scheduleData.ts` to a single canonical implementation.
+- Verified recovery:
+  - `npm run build` passed
+  - `npm run test` passed
+  - `npm run dev` started successfully (auto-port if 8080 occupied)
+
+### 2) Dev Server Reliability
+- Updated Vite dev host binding to local IPv4 for safer startup:
+  - `vite.config.ts`: `server.host` set to `127.0.0.1`
+- Confirmed earlier `EPERM`/binding issues were environment + port conflicts.
+
+### 3) NPM/Dependency State
+- Installed dependencies to resolve missing module at runtime (`papaparse`).
+- Confirmed `package.json`/`package-lock.json` include required `papaparse` packages.
+
+### 4) Auth Redirect Hardening (Magic Link Cross-Device Issue)
+- Problem observed: magic link redirect depended on current origin/localhost, which breaks when opening link on another machine.
+- Implemented env-driven redirect fallback logic in Hub auth path:
+  - Prefer `VITE_AUTH_REDIRECT_URL`, then `VITE_APP_URL`, then fallback to `window.location.origin`.
+- Documented required env + Supabase redirect settings in README.
+
+### 5) Auth Mode Change: Email/Password
+- Switched `/hub` sign-in from magic-link OTP to email/password:
+  - `supabase.auth.signInWithPassword(...)`
+- Kept existing `@virtuix.com` domain guard and sign-out/session behavior.
+- Added password input UI.
+
+### 6) Forgot Password + Recovery Flow (then UI-hidden)
+- Implemented reset password capability in code:
+  - `resetPasswordForEmail(...)` + redirect handling
+  - `PASSWORD_RECOVERY` event detection
+  - new-password update form via `updateUser({ password })`
+- Due Supabase email limit constraints, hid the visible `Forgot password?` button from login UI for now.
+- Logic remains in code for future re-enable.
+
+### 7) Hub Navigation UX
+- Added `Back to Schedule` button on login page.
+- Made top-left logo group clickable to `/` across Hub states (loading/login/authenticated).
+
+### 8) Zendesk Sync Robustness + Scheduling
+- Added automatic cron sync every 5 minutes (Supabase DB migration using `pg_cron` + `pg_net`).
+- Added overlap protection:
+  - DB-level unique partial index for single `running` sync
+  - function-level graceful skip response (`202`) when a sync is already running
+- Added retry/backoff for Zendesk API transient failures (`429` / `5xx`) with `Retry-After` support.
+- Improved Hub sync error messaging to surface backend error details instead of generic non-2xx.
+
+### 9) UI/UX Refinements Continued
+- Public `/` and private `/hub` branding alignment completed:
+  - top-left logos standardized (`virtuix_logo_white` + `omnione_logo_square` ordering)
+- Public `/`:
+  - schedule-only layout retained
+  - day labels in schedule tables shown as pills (`MON`, `TUE`, etc.)
+- Hub `/hub`:
+  - ticket table enhancements retained (filters, status bubbles, requester, links, scroll + sticky headers)
+  - ArenaSitesTable updated to match ticket table shell (sticky header + limited visible rows)
+  - ArenaSites section header changed to Omni Arena logo
+
+### 10) Git Hygiene + Repo Cleanup
+- Added ignore rules:
+  - `*.Zone.Identifier`
+  - `supabase/.temp/`
+- Removed local junk metadata/temp artifacts.
+
+### 11) Documentation Update
+- Replaced old Lovable boilerplate README with accurate project README:
+  - architecture
+  - routes/features
+  - env/secrets
+  - Supabase/Zendesk workflow
+  - troubleshooting
+
+### 12) Branch/Push Summary
+- Changes were committed and pushed across active branches during session:
+  - `dev` updated with Hub/Auth/Zendesk/UI changes and follow-up fixes
+  - `main` merged/pushed with conflict resolution preserving intended `dev` behavior in conflicted files
+- Latest notable main updates include:
+  - build-break fix from duplicate exports
+  - README rewrite
+  - hidden forgot-password button (logic retained)
+
+## Current State Snapshot (end of continuation)
+- `/` works as public schedule view with updated UI and login CTA.
+- `/hub` uses email/password auth, domain-gated to Virtuix users.
+- Zendesk sync is operational with manual + scheduled sync and overlap protection.
+- UI reflects modern/minimal card style with standardized branding.
+- Build and test pass locally after runtime/build fixes.
+
+## Session Continuation (2026-02-19 to 2026-02-20)
+
+### 1) New Support Copilot + Digest Backend
+- Added migration: `supabase/migrations/20260219131500_add_support_copilot_tables.sql`
+  - New tables: `ticket_cache`, `ticket_summaries`, `digests`, `digest_tickets`
+  - Added indexes and `updated_at` triggers
+  - Enabled RLS + read policies for authenticated `@virtuix.com` users
+- Added new Supabase Edge Functions:
+  - `supabase/functions/sync_zendesk/index.ts`
+  - `supabase/functions/summarize_ticket/index.ts`
+  - `supabase/functions/create_digest/index.ts`
+  - `supabase/functions/send_to_slack/index.ts`
+
+### 2) Frontend Hub Rework
+- Rebuilt `src/pages/Hub.tsx` to support:
+  - Left sidebar navigation (Ticket Operations + Digests)
+  - Right docked AI Copilot panel (chat-style helper UI)
+  - Mobile collapse via Sheets for sidebar/copilot
+- Added ticket workflow features:
+  - Row selection in ticket tables
+  - `Generate Digest` from selected tickets or current filters
+  - Ticket drawer with:
+    - summary display
+    - refresh summary
+    - send summary to Slack
+    - copy summary
+- Added digest workflow features:
+  - Digest list/detail view under `/hub/digests`
+  - send digest to Slack
+  - copy markdown
+  - copy table format
+- Added data contracts in `src/types/support.ts`
+- Extended Supabase TS table types in `src/integrations/supabase/types.ts`
+- Added `/hub/digests` route in `src/App.tsx`
+
+### 3) Manual CLI Sync Helpers
+- Added npm scripts in `package.json`:
+  - `sync:zendesk`
+  - `sync:zendesk:omni-one`
+  - `sync:zendesk:omni-arena`
+- Scripts call `sync_zendesk` directly via `curl` using `.env` keys.
+
+### 4) README Updates
+- Expanded setup docs for new feature stack:
+  - new edge function deploy commands
+  - required secrets (`OPENAI_API_KEY`, `OPENAI_MODEL`, `SLACK_WEBHOOK_URL`, Zendesk secrets)
+  - migration/deploy steps
+
+### 5) Critical Production Debugging (Root Cause + Fixes)
+- Symptoms observed:
+  - Missing `ticket_cache`/`digests` table errors in schema cache
+  - Sync button failing with non-2xx
+  - Manual CLI sync succeeding
+- Root cause discovered:
+  - Supabase CLI was linked to wrong project (`crkcikzcezljlgqmbyuc`) while frontend used `ddqacivmenvlidzxxhyv`
+- Recovery performed:
+  - Relinked CLI to `ddqacivmenvlidzxxhyv`
+  - Deleted generated/dangerous snapshot migration `20260219222030_remote_schema.sql`
+  - Marked `20260216003000` as applied to avoid running old hardcoded scheduler SQL
+  - Pushed intended migration `20260219131500`
+  - Deployed all four new functions to correct project
+  - Verified table endpoints and function availability in correct project
+
+### 6) Sync Button 401/Invalid JWT Incident
+- Browser request failed with:
+  - `401 Unauthorized`
+  - `{"code":401,"message":"Invalid JWT"}`
+- Added auth-retry wrapper in `Hub.tsx` for function calls:
+  - refresh session and retry once when JWT invalid
+- Remaining user-facing issue persisted for sync action in browser context.
+
+### 7) Final Sync Reliability Hard Fallback
+- Implemented Sync-button hard fallback path in `Hub.tsx`:
+  - primary: `supabase.functions.invoke("sync_zendesk")`
+  - fallback on error: direct `fetch` to `.../functions/v1/sync_zendesk` with anon key headers (same behavior as working CLI/manual route)
+- Verified fallback path works from UI and sync can run repeatedly.
+
+### 8) Current Known Caveat
+- Omni One/Omni Arena UI visibility depends on correct Zendesk brand ID secrets.
+- If IDs are wrong, tickets may sync into `brand='unknown'` and not appear in brand-filtered tables.
+
+### 9) Local Runtime State
+- Dev server restarted and confirmed available at `http://127.0.0.1:8080/` for local validation.
+
+
+### 10) Final UX Layout Adjustment (/hub width)
+- Widened Hub shell to reduce horizontal table scrolling pressure and better use space between left sidebar and right copilot.
+- Updated `src/pages/Hub.tsx`:
+  - container max width increased from `1600px` to `1900px` (header + content)
+  - grid columns rebalanced to favor center table area:
+    - `lg`: `220px / 1fr`
+    - `xl`: `220px / 1fr / 300px`
+    - `2xl`: `240px / 1fr / 320px`
+- Result: noticeably wider center content area with less need for sideways scrolling in ticket tables.
+
+### 11) Session Closeout + Repo Hygiene
+- Pushed feature commit to `main` (`8da6bad`) including new support copilot/digest workflow and sync fallback changes.
+- Added additional `.gitignore` rules to keep local/session-only artifacts out of source control and restore clean status.
+- Verified local working tree cleanliness after ignore updates.
+
+### 12) Function Reliability + Real Copilot Chat (latest)
+- Diagnosed non-sync function failures and confirmed root cause with direct function probes:
+  - `summarize_ticket` failed due missing `OPENAI_API_KEY`
+  - `copilot_chat` failed due missing `OPENAI_API_KEY`
+  - `send_to_slack` failed due missing `SLACK_WEBHOOK_URL`
+  - `create_digest` confirmed operational with successful persisted output
+- Implemented robust frontend function invocation path in `src/pages/Hub.tsx`:
+  - primary path: `supabase.functions.invoke`
+  - auth refresh + retry on invalid JWT
+  - fallback path: direct anon-key HTTP call to edge function endpoint
+  - applied to sync, summarize, create digest, and Slack send actions
+- Replaced static Copilot response logic with backend AI chat calls:
+  - new edge function: `supabase/functions/copilot_chat/index.ts`
+  - frontend copilot panel now sends/receives live model responses per message
+  - added `CopilotChatResponse` type in `src/types/support.ts`
+- Updated README deploy section to include `copilot_chat` deployment command.
+- Deployed `copilot_chat` to Supabase project `ddqacivmenvlidzxxhyv`.
+- Required secrets identified and documented for full functionality:
+  - `OPENAI_API_KEY`
+  - `OPENAI_MODEL` (recommended)
+  - `SLACK_WEBHOOK_URL`
+
+## Session Continuation (2026-02-24)
+
+### 1) Supabase Edge Function `Invalid JWT` Deep-Debug (Hub-triggered sync)
+- User symptom: from local dev (`127.0.0.1:8080`), `/hub` sync action returned `{"code":401,"message":"Invalid JWT"}`.
+- Confirmed frontend token claims from browser-side debug payload:
+  - `token_project_ref=ddqacivmenvlidzxxhyv`
+  - `expected_project_ref=ddqacivmenvlidzxxhyv`
+  - `token_role=authenticated`
+  - `token_expired=false`
+- Confirmed local repo config ref alignment:
+  - `.env` and `supabase/config.toml` pointed to `ddqacivmenvlidzxxhyv`.
+- Live curl probes against hosted function showed function-level auth responses when requests reached code path:
+  - no `Authorization` -> `401 auth_missing_bearer_token`
+  - malformed token -> `401 auth_invalid_or_expired_user_token`
+- Root-cause determination:
+  - Gateway JWT verification was intermittently producing `Invalid JWT` for browser-authenticated token path in this project context.
+  - Stabilization path adopted: disable gateway JWT verification per function and enforce auth in shared function code.
+
+### 2) Shared Function Auth Framework Added
+- Added `supabase/functions/_shared/auth.ts`:
+  - bearer extraction + structured `HttpError`
+  - decoded role handling (`service_role` gating)
+  - strict service-role validation (`token === SUPABASE_SERVICE_ROLE_KEY`) when allowed
+  - user token validation via `auth.getUser()`
+  - `@virtuix.com` domain restriction
+- Added `supabase/functions/_shared/auth_debug.ts`:
+  - safe auth diagnostics (header presence, token kind/prefix, claim subset, project-ref match, expiry)
+  - per-function auth debug logging.
+
+### 3) Auth Enforcement Rolled Out to All Edge Functions
+- Applied `authorizeVirtuixRequest(...)` + `HttpError` response propagation to:
+  - `sync_zendesk`
+  - `zendesk-sync`
+  - `summarize_ticket`
+  - `create_digest`
+  - `send_to_slack`
+  - `copilot_chat`
+- Result:
+  - auth failures now return explicit function JSON with correct HTTP status (not opaque gateway failure).
+
+### 4) Frontend `/hub` Invocation Hardening
+- Updated `src/pages/Hub.tsx` function call path to direct robust fetch flow:
+  - normalize and decode session access token
+  - refresh session if token near expiry
+  - hard-check token project ref vs configured `VITE_SUPABASE_URL` ref
+  - invoke function with `Authorization: Bearer <access_token>` and `apikey` headers
+  - retry once after forced refresh on auth-token errors
+  - include client auth debug snapshot in sync error surface when auth fails.
+
+### 5) Function Gateway Verification Locked Down in Config
+- Updated `supabase/config.toml`:
+  - set `verify_jwt = false` for all six active functions (`sync_zendesk`, `zendesk-sync`, `summarize_ticket`, `create_digest`, `send_to_slack`, `copilot_chat`).
+- This preserves consistent in-function auth behavior across deployments.
+
+### 6) Operator Script and Docs Updates
+- Updated `package.json` sync scripts:
+  - no longer send anon key as bearer token
+  - now require `SUPABASE_FUNCTION_TOKEN` or `SUPABASE_SERVICE_ROLE_KEY`.
+- Updated README:
+  - added edge auth baseline + rollout checklist
+  - added OpenAI model/fallback secret guidance
+  - documented new operator env usage for CLI probes.
+
+### 7) Verification Executed
+- Live auth smoke tests run across all six functions:
+  - no-auth requests return HTTP 401 with `auth_missing_bearer_token`
+  - invalid bearer returns HTTP 401 with `auth_invalid_or_expired_user_token`.
+- Local checks:
+  - `npm run test` passed
+  - `npm run build` passed.
+- User validation:
+  - sync from Hub reported as working after auth changes.
+
+### 8) Remaining Summary Failure Fixed (`model_not_found`)
+- User-reported error:
+  - OpenAI 404 `model_not_found` for `gpt-4o-mini`.
+- Added `supabase/functions/_shared/openai_chat.ts`:
+  - model candidate resolution
+  - automatic retry on `404` / `model_not_found` / access-denied model errors
+  - returns actual model used.
+- Updated:
+  - `summarize_ticket` to use fallback helper and persist/report actual model
+  - `copilot_chat` to use same fallback helper.
+- Set secrets in project:
+  - `OPENAI_MODEL="gpt-4.1-mini"`
+  - `OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o"`
+- Deployed updated functions:
+  - `summarize_ticket`
+  - `copilot_chat`.
