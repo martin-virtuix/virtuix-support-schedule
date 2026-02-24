@@ -1,14 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
-import { Bot, Copy, Loader2, Menu, RefreshCw, Send, Sparkles } from "lucide-react";
+import { Copy, Loader2, Menu, RefreshCw, Send, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Textarea } from "@/components/ui/textarea";
 import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
+import { CopilotChatDock, type CopilotChatInputMessage } from "@/components/hub/CopilotChatDock";
 import { getArenaSites, type ArenaSite } from "@/lib/scheduleData";
 import { useToast } from "@/hooks/use-toast";
 import type {
@@ -421,87 +421,6 @@ function SideNavigation({ userEmail, onSignOut }: { userEmail: string; onSignOut
   );
 }
 
-function CopilotPanel({
-  onAsk,
-}: {
-  onAsk: (messages: Array<{ role: "user" | "assistant"; content: string }>) => Promise<string>;
-}) {
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
-    {
-      role: "assistant",
-      content:
-        "I can help with triage. Ask for queue counts, digest strategy, or suggested next actions.",
-    },
-  ]);
-  const [prompt, setPrompt] = useState("");
-  const [sending, setSending] = useState(false);
-
-  async function sendPrompt() {
-    const value = prompt.trim();
-    if (!value) return;
-    const userMessage = { role: "user" as const, content: value };
-    const history = [...messages, userMessage];
-    setMessages(history);
-    setPrompt("");
-    setSending(true);
-
-    try {
-      const reply = await onAsk(history);
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-    } catch (error) {
-      const details = error instanceof Error ? error.message : "Copilot request failed.";
-      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${details}` }]);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="flex h-full flex-col rounded-2xl border bg-card/60 backdrop-blur-sm">
-      <div className="border-b px-4 py-3">
-        <p className="flex items-center gap-2 text-sm font-medium">
-          <Bot className="h-4 w-4 text-primary" />
-          AI Copilot
-        </p>
-        <p className="text-xs text-muted-foreground">Operational assistant for support execution</p>
-      </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {messages.map((message, idx) => (
-          <div
-            key={idx}
-            className={[
-              "rounded-lg border px-3 py-2 text-sm",
-              message.role === "assistant" ? "bg-muted/30 text-foreground" : "bg-primary/15 text-primary-foreground border-primary/30",
-            ].join(" ")}
-          >
-            {message.content}
-          </div>
-        ))}
-        {sending ? <p className="text-xs text-muted-foreground">Copilot is typing...</p> : null}
-      </div>
-
-      <div className="space-y-2 border-t px-4 py-3">
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => setPrompt("What should we prioritize in the queue today?")}>Prioritize queue</Button>
-          <Button size="sm" variant="outline" onClick={() => setPrompt("Draft a digest strategy for unresolved tickets.")}>Digest strategy</Button>
-        </div>
-        <div className="flex items-end gap-2">
-          <Textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Ask Copilot..."
-            className="min-h-[74px] resize-none"
-          />
-          <Button size="icon" onClick={sendPrompt} aria-label="Send copilot prompt" disabled={sending}>
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function TicketTable({
   rows,
   loading,
@@ -888,7 +807,6 @@ export default function Hub() {
 
   const [generatingDigest, setGeneratingDigest] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [mobileCopilotOpen, setMobileCopilotOpen] = useState(false);
 
   const inDigestRoute = location.pathname === "/hub/digests";
 
@@ -1393,7 +1311,7 @@ export default function Hub() {
     }
   }
 
-  async function handleCopilotAsk(messages: Array<{ role: "user" | "assistant"; content: string }>): Promise<string> {
+  async function handleCopilotAsk(messages: CopilotChatInputMessage[]): Promise<string> {
     const data = await invokeFunctionRobust<CopilotChatResponse>("copilot_chat", {
       messages,
       context: {
@@ -1509,16 +1427,13 @@ export default function Hub() {
             <Button size="icon" variant="outline" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
               <Menu className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="outline" onClick={() => setMobileCopilotOpen(true)} aria-label="Open copilot">
-              <Bot className="h-4 w-4" />
-            </Button>
           </div>
           <span className="hidden lg:inline text-xs text-muted-foreground">{userEmail}</span>
         </div>
       </div>
 
       <div className="container max-w-[1900px] py-6 px-4 relative z-10">
-        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_300px] 2xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]">
           <aside className="hidden lg:block">
             <SideNavigation userEmail={userEmail} onSignOut={() => void handleSignOut()} />
           </aside>
@@ -1609,10 +1524,6 @@ export default function Hub() {
               </>
             )}
           </section>
-
-          <aside className="hidden xl:block">
-            <CopilotPanel onAsk={handleCopilotAsk} />
-          </aside>
         </div>
       </div>
 
@@ -1624,13 +1535,7 @@ export default function Hub() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={mobileCopilotOpen} onOpenChange={setMobileCopilotOpen}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-md">
-          <div className="h-full p-4">
-            <CopilotPanel onAsk={handleCopilotAsk} />
-          </div>
-        </SheetContent>
-      </Sheet>
+      <CopilotChatDock onAsk={handleCopilotAsk} />
 
       <TicketDrawer
         open={ticketDrawerOpen}

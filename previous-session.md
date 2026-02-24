@@ -600,3 +600,30 @@ Modified (major):
 - Deployed updated functions:
   - `summarize_ticket`
   - `copilot_chat`.
+
+### 9) Hub Copilot UX Redesign (chat-first, minimize-able, multi-session)
+- Replaced the static always-open right sidebar copilot with a floating chat dock in `/hub`:
+  - new component: `src/components/hub/CopilotChatDock.tsx`
+  - integrated in `src/pages/Hub.tsx`
+- New chat UX behavior:
+  - minimize/open launcher bubble (bottom-right)
+  - unread message badge counter
+  - notification banner when new replies arrive while minimized
+  - chat bubbles with date banners and per-message timestamps
+  - quick prompts and enter-to-send behavior
+  - typing indicator state
+- Added multi-session chat threads in UI:
+  - create new chat sessions (`+`)
+  - switch between sessions with per-session unread badges
+  - session titles auto-derived from first user prompt
+  - sessions currently in-memory per page load (not yet persisted across refresh/devices)
+- Removed old copilot presentation paths:
+  - deleted static `CopilotPanel` usage
+  - removed mobile copilot sheet toggle path
+  - kept support navigation mobile sheet unchanged
+- Layout adjustments:
+  - simplified main content grid now that right sidebar copilot column is removed
+  - chat dock remains accessible while working in Tickets and Digests views.
+- Validation:
+  - `npm run test` passed
+  - `npm run build` passed.
