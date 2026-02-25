@@ -13,13 +13,14 @@ A Vite/React app with two experiences:
 - Includes login CTA to the private Hub.
 
 ### Private Hub (`/hub`)
-- Supabase Auth sign-in flow (email OTP), restricted to `@virtuix.com` users in app logic and DB RLS read policies.
+- Supabase Auth sign-in flow (email/password), restricted to `@virtuix.com` users in app logic and DB RLS read policies.
 - Two Zendesk-backed ticket tables:
   - Omni One tickets
   - Omni Arena tickets
 - Documents workspace (`/hub/documents`) for PDF knowledge files stored in Supabase Storage, split by:
   - `omni_one` folder
   - `omni_arena` folder
+- Digests workspace (`/hub/digests`) for AI-generated open ticket operational summaries.
 - Features:
   - Status filters (`all`, `open`, `pending`, `new`)
   - Status badge colors (Zendesk-like)
@@ -28,6 +29,31 @@ A Vite/React app with two experiences:
   - Scrollable tables with sticky headers
 - Arena Sites table with filters/search/sort and sticky-header scrolling.
 - `Sync now` button triggers Zendesk sync function and refreshes Hub data.
+
+### Documents Workspace (`/hub/documents`)
+- Reads PDF files from Supabase Storage bucket `support-documents` (or `VITE_SUPPORT_DOCUMENTS_BUCKET` override).
+- Brand-level organization:
+  - `omni_one/...`
+  - `omni_arena/...`
+- Supports nested folders and top-level subfolder filtering in UI per brand.
+- Includes:
+  - in-app PDF preview
+  - file download
+  - per-brand folder filter chips (`All folders` + discovered folder names)
+  - manual refresh.
+
+Suggested folder layout:
+
+```text
+support-documents/
+  omni_one/
+    shipping_labels/
+    knowledge_base/
+  omni_arena/
+    Q1_2026/
+    Q4_2025/
+    knowledge_base/
+```
 
 ## Tech Stack
 
@@ -147,6 +173,10 @@ npm run preview    # Preview built app
 npx supabase db push
 ```
 
+Important recent migrations for Hub/Documents:
+- `20260221180500_route_cron_to_sync_zendesk.sql`
+- `20260225113000_add_support_documents_bucket.sql`
+
 ### Deploy function
 
 ```bash
@@ -238,6 +268,8 @@ npx supabase db push
 
 - `/` → public schedule page
 - `/hub` → private support hub (auth required)
+- `/hub/digests` → private digest workspace (auth required)
+- `/hub/documents` → private documents workspace (auth required)
 
 ## Project Structure (key files)
 
@@ -268,3 +300,13 @@ from public.zendesk_sync_runs
 order by started_at desc
 limit 20;
 ```
+
+### Documents show empty list in `/hub/documents`
+- Verify bucket name:
+  - default `support-documents`
+  - or set `VITE_SUPPORT_DOCUMENTS_BUCKET` in `.env`
+- Verify object prefixes start with:
+  - `omni_one/`
+  - `omni_arena/`
+- Only `.pdf` files are listed.
+- Use `Refresh` in Documents pane after adding/moving files.
