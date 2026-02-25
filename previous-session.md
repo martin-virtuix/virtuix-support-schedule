@@ -690,3 +690,93 @@ Modified (major):
 - `npm run build` passed.
 - Edge functions deployed successfully to project:
   - `ddqacivmenvlidzxxhyv`
+
+## Session Continuation (2026-02-25, Documents Visualizer Iterations)
+
+### 1) First Iteration: `/hub/documents` Feature Added
+- Added new Hub route:
+  - `/hub/documents` in `src/App.tsx`
+- Added new sidebar navigation item:
+  - `Documents` in `src/pages/Hub.tsx`
+- Implemented a new Documents pane in `src/pages/Hub.tsx` with:
+  - brand selection (`omni_one`, `omni_arena`)
+  - PDF list from Supabase Storage
+  - preview via signed URL (`createSignedUrl`)
+  - download action (`storage.download`)
+  - manual refresh action
+- Added env support:
+  - `VITE_SUPPORT_DOCUMENTS_BUCKET` (defaults to `support-documents`)
+- Updated README with bucket/env details.
+
+### 2) Storage Migration + Access Policy
+- Added migration:
+  - `supabase/migrations/20260225113000_add_support_documents_bucket.sql`
+- Migration behavior:
+  - creates private bucket `support-documents` if missing
+  - adds authenticated read policy on `storage.objects` for that bucket.
+
+### 3) `db push` Failure Recovered (Migration History Mismatch)
+- User hit:
+  - `remote migrations versions not found in local migrations directory`
+- Root cause:
+  - remote had `20260221180500` that was missing locally.
+- Fix:
+  - restored missing migration file:
+    - `supabase/migrations/20260221180500_route_cron_to_sync_zendesk.sql`
+  - re-ran `npx supabase db push` successfully
+  - verified local/remote migration versions aligned.
+
+### 4) Bucket Setup Guidance + Initial Validation
+- Recommended bucket security:
+  - private bucket (not public)
+  - restrict MIME types to `application/pdf`
+  - restrict file size (initially 50MB)
+- Initial validation outcome:
+  - `omni_one` documents loaded/previewed correctly
+  - `omni_arena` failed with `object not found`.
+
+### 5) Documents Loader Debug Iterations (Critical Path/Traversal Fixes)
+- Iteration A:
+  - hardened path reconstruction and folder detection.
+- Iteration B:
+  - added traversal guards (`visited`/queued de-dup + safety caps) to stop repeated refresh/spin behavior.
+- Iteration C:
+  - adjusted folder/file heuristics when `omni_arena` appeared empty.
+- Final root cause found:
+  - legacy object keys under `omni_arena` included double-slash segments (e.g., `omni_arena//...`).
+- Final fix:
+  - preserved raw storage paths for signed URL/download calls (no destructive slash collapsing)
+  - added tolerant prefix traversal (`brand`, `brand/`, `brand//`)
+  - retained loop protection and de-duplication.
+- Result:
+  - both Omni One and Omni Arena document listing/preview/download working.
+
+### 6) Subfolder UX Added (Per Brand)
+- User requested folder selection inside each product line.
+- Implemented subfolder filtering in `Documents` pane:
+  - auto-derived top-level folder options from PDF paths
+  - added folder chips/buttons with `All folders`
+  - persisted selection per brand (independent folder state)
+  - brand + folder changes auto-select first matching document.
+- Supports requested structures such as:
+  - `omni_one/shipping_labels`
+  - `omni_one/knowledge_base`
+  - `omni_arena/Q1_2026`
+  - `omni_arena/Q4_2025`
+  - `omni_arena/knowledge_base`.
+
+### 7) Validation Summary for Documents Work
+- `npm run build` passed after each major iteration and final folder-filter change.
+- User confirmed final runtime behavior:
+  - Omni One and Omni Arena docs both load and render
+  - folder-based organization/filtering works as requested.
+
+### 8) Git/Branch Closeout
+- Committed on `main`:
+  - `90aa3d1` — `feat: add support documents viewer with brand subfolder filters`
+- Pushed `main` to remote successfully.
+- `dev` diverged from `main`; merged `main` into `dev` (non-FF merge):
+  - `06e729a`
+- Pushed `dev` to remote successfully.
+- End state:
+  - both `origin/main` and `origin/dev` include latest Documents visualizer work.
