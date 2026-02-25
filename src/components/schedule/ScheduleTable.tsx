@@ -41,14 +41,14 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
   }
 
   return (
-    <div className="glass-card rounded-xl overflow-hidden border bg-card/80 backdrop-blur-sm">
-      <Table>
+    <div className="glass-card rounded-xl border bg-card/80 backdrop-blur-sm">
+      <Table className="w-full table-fixed text-[0.95rem]">
         <TableHeader>
           <TableRow className="border-border/50 hover:bg-transparent">
-            <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Day</TableHead>
-            <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Business Hours</TableHead>
-            <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">On Duty</TableHead>
-            <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Notes</TableHead>
+            <TableHead className="w-[96px] text-xs uppercase tracking-wider text-muted-foreground font-semibold">Day</TableHead>
+            <TableHead className="w-[220px] whitespace-nowrap text-xs uppercase tracking-wider text-muted-foreground font-semibold">Business Hours</TableHead>
+            <TableHead className="w-[280px] text-xs uppercase tracking-wider text-muted-foreground font-semibold">On Duty</TableHead>
+            <TableHead className="min-w-[220px] text-xs uppercase tracking-wider text-muted-foreground font-semibold">Notes</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -78,10 +78,10 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
                     {dayPillLabel[key] || dayLabel[key].slice(0, 3).toUpperCase()}
                   </span>
                 </TableCell>
-                <TableCell className="text-muted-foreground">
+                <TableCell className="whitespace-nowrap text-foreground/95">
                   {formatHours(key, bundle.businessHours)}
                 </TableCell>
-                <TableCell>{people}</TableCell>
+                <TableCell className="text-foreground/95">{people}</TableCell>
                 <TableCell className="text-muted-foreground">{note}</TableCell>
               </TableRow>
             );

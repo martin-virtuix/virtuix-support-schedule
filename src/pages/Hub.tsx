@@ -1,14 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
-import { Bot, Copy, Loader2, Menu, RefreshCw, Send, Sparkles } from "lucide-react";
+import { Copy, Loader2, Menu, RefreshCw, Send, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Textarea } from "@/components/ui/textarea";
 import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
+import { CopilotChatDock, type CopilotChatInputMessage } from "@/components/hub/CopilotChatDock";
 import { getArenaSites, type ArenaSite } from "@/lib/scheduleData";
 import { useToast } from "@/hooks/use-toast";
 import type {
@@ -72,6 +72,8 @@ type AccessTokenContext = {
   claims: JwtClaims;
 };
 
+const ACTIVE_TICKET_STATUSES = new Set(["new", "open", "pending"]);
+
 type ClientAuthDebug = {
   token_prefix: string | null;
   token_project_ref: string | null;
@@ -79,6 +81,54 @@ type ClientAuthDebug = {
   expected_project_ref: string | null;
   token_expired: boolean | null;
 };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  return value as Record<string, unknown>;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function extractRequesterFromRawPayload(rawPayload: unknown): { name: string | null; email: string | null } {
+  const payload = asRecord(rawPayload);
+  if (!payload) {
+    return { name: null, email: null };
+  }
+
+  const requester = asRecord(payload.requester);
+  const submitter = asRecord(payload.submitter);
+  const via = asRecord(payload.via);
+  const viaSource = asRecord(via?.source);
+  const viaFrom = asRecord(viaSource?.from);
+
+  const name = firstNonEmptyString(
+    normalizeOptionalString(requester?.name),
+    normalizeOptionalString(submitter?.name),
+    normalizeOptionalString(viaFrom?.name),
+  );
+
+  const email = firstNonEmptyString(
+    normalizeOptionalString(requester?.email),
+    normalizeOptionalString(submitter?.email),
+    normalizeOptionalString(viaFrom?.address),
+    normalizeOptionalString(viaFrom?.email),
+  );
+
+  return { name, email };
+}
 
 function isAllowedEmail(email?: string | null): boolean {
   return !!email && email.toLowerCase().endsWith(ALLOWED_DOMAIN);
@@ -370,19 +420,40 @@ function normalizeSummaryRecord(item: {
   };
 }
 
+function normalizeTicketRecord(item: Ticket & { raw_payload?: unknown }): Ticket {
+  const fallbackRequester = extractRequesterFromRawPayload(item.raw_payload);
+  return {
+    ticket_id: item.ticket_id,
+    brand: item.brand,
+    subject: item.subject,
+    status: item.status,
+    priority: item.priority,
+    requester_email: firstNonEmptyString(item.requester_email, fallbackRequester.email),
+    requester_name: firstNonEmptyString(item.requester_name, fallbackRequester.name),
+    assignee_email: item.assignee_email,
+    zendesk_updated_at: item.zendesk_updated_at,
+    ticket_url: item.ticket_url,
+    summary_text: item.summary_text,
+  };
+}
+
 function formatTicketTableForClipboard(rows: Array<Record<string, unknown>>): string {
-  const header = ["Ticket", "Brand", "Status", "Priority", "Requester", "Updated", "Subject"];
+  const header = ["Ticket ID", "Requester", "Created At", "Updated At", "Subject"];
   const lines = [header.join("\t")];
   rows.forEach((row) => {
+    const ticketId = row.ticket_id ?? row.ticket ?? "";
+    const requester = row.requester ?? row.requester_name ?? row.requester_email ?? "";
+    const createdAt = row.created_at ?? row.zendesk_created_at ?? "";
+    const updatedAt = row.updated_at ?? row.zendesk_updated_at ?? "";
+    const subject = row.subject ?? row.summary ?? "";
+
     lines.push(
       [
-        row.ticket_id,
-        row.brand,
-        row.status,
-        row.priority,
-        row.requester,
-        row.updated_at,
-        row.subject,
+        ticketId,
+        requester,
+        createdAt,
+        updatedAt,
+        subject,
       ]
         .map((cell) => String(cell ?? ""))
         .join("\t"),
@@ -421,87 +492,6 @@ function SideNavigation({ userEmail, onSignOut }: { userEmail: string; onSignOut
   );
 }
 
-function CopilotPanel({
-  onAsk,
-}: {
-  onAsk: (messages: Array<{ role: "user" | "assistant"; content: string }>) => Promise<string>;
-}) {
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
-    {
-      role: "assistant",
-      content:
-        "I can help with triage. Ask for queue counts, digest strategy, or suggested next actions.",
-    },
-  ]);
-  const [prompt, setPrompt] = useState("");
-  const [sending, setSending] = useState(false);
-
-  async function sendPrompt() {
-    const value = prompt.trim();
-    if (!value) return;
-    const userMessage = { role: "user" as const, content: value };
-    const history = [...messages, userMessage];
-    setMessages(history);
-    setPrompt("");
-    setSending(true);
-
-    try {
-      const reply = await onAsk(history);
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-    } catch (error) {
-      const details = error instanceof Error ? error.message : "Copilot request failed.";
-      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${details}` }]);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="flex h-full flex-col rounded-2xl border bg-card/60 backdrop-blur-sm">
-      <div className="border-b px-4 py-3">
-        <p className="flex items-center gap-2 text-sm font-medium">
-          <Bot className="h-4 w-4 text-primary" />
-          AI Copilot
-        </p>
-        <p className="text-xs text-muted-foreground">Operational assistant for support execution</p>
-      </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {messages.map((message, idx) => (
-          <div
-            key={idx}
-            className={[
-              "rounded-lg border px-3 py-2 text-sm",
-              message.role === "assistant" ? "bg-muted/30 text-foreground" : "bg-primary/15 text-primary-foreground border-primary/30",
-            ].join(" ")}
-          >
-            {message.content}
-          </div>
-        ))}
-        {sending ? <p className="text-xs text-muted-foreground">Copilot is typing...</p> : null}
-      </div>
-
-      <div className="space-y-2 border-t px-4 py-3">
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => setPrompt("What should we prioritize in the queue today?")}>Prioritize queue</Button>
-          <Button size="sm" variant="outline" onClick={() => setPrompt("Draft a digest strategy for unresolved tickets.")}>Digest strategy</Button>
-        </div>
-        <div className="flex items-end gap-2">
-          <Textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Ask Copilot..."
-            className="min-h-[74px] resize-none"
-          />
-          <Button size="icon" onClick={sendPrompt} aria-label="Send copilot prompt" disabled={sending}>
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function TicketTable({
   rows,
   loading,
@@ -513,12 +503,15 @@ function TicketTable({
   onGenerateDigest,
   generatingDigest,
 }: TableProps) {
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "pending" | "new" | "hold">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "pending" | "new">("all");
   const [query, setQuery] = useState("");
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
-      const statusMatches = statusFilter === "all" ? true : row.status.toLowerCase() === statusFilter;
+      const normalizedStatus = row.status.toLowerCase();
+      const statusMatches = statusFilter === "all"
+        ? ACTIVE_TICKET_STATUSES.has(normalizedStatus)
+        : normalizedStatus === statusFilter;
       const searchMatches =
         query.trim().length === 0
           ? true
@@ -540,14 +533,7 @@ function TicketTable({
       return;
     }
 
-    await onGenerateDigest({
-      filters: {
-        brand: rows[0]?.brand ?? "all",
-        status: statusFilter,
-        search: query,
-        limit: 50,
-      },
-    });
+    await onGenerateDigest({ ticketIds: filteredRows.map((row) => row.ticket_id) });
   }
 
   return (
@@ -560,7 +546,7 @@ function TicketTable({
             placeholder="Search subject or requester..."
             className="h-8 w-full sm:w-[260px]"
           />
-          {(["all", "open", "pending", "new", "hold"] as const).map((status) => (
+          {(["all", "open", "pending", "new"] as const).map((status) => (
             <Button
               key={status}
               variant={statusFilter === status ? "secondary" : "ghost"}
@@ -730,7 +716,7 @@ function TicketDrawer({
 
             <div className="rounded-lg border bg-background/50 p-4">
               <h3 className="mb-2 text-sm font-semibold">Summary</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
                 {summary?.summary_text || ticket.summary_text || "No summary yet. Click Refresh Summary to generate one."}
               </p>
 
@@ -785,13 +771,13 @@ function DigestsPane({
   const selected = digests.find((item) => item.id === selectedDigestId) || null;
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <div className="rounded-2xl border bg-card/50 p-4 backdrop-blur-sm">
+    <section className="grid gap-4 xl:h-[calc(100vh-15rem)] xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="rounded-2xl border bg-card/50 p-4 backdrop-blur-sm xl:flex xl:min-h-0 xl:h-full xl:flex-col">
         <h2 className="mb-3 text-sm font-semibold">Recent Digests</h2>
         {loading ? <p className="text-sm text-muted-foreground">Loading digests...</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {!loading && !error ? (
-          <div className="space-y-2">
+          <div className="space-y-2 xl:min-h-0 xl:flex-1 xl:overflow-auto pr-1">
             {digests.map((digest) => (
               <button
                 key={digest.id}
@@ -810,9 +796,9 @@ function DigestsPane({
         ) : null}
       </div>
 
-      <div className="rounded-2xl border bg-card/50 p-4 backdrop-blur-sm">
+      <div className="rounded-2xl border bg-card/50 p-4 backdrop-blur-sm xl:flex xl:min-h-0 xl:h-full xl:flex-col">
         {selected ? (
-          <div className="space-y-4">
+          <div className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold">{selected.title}</h2>
@@ -834,9 +820,14 @@ function DigestsPane({
               </div>
             </div>
 
-            <pre className="max-h-[500px] overflow-auto rounded-lg border bg-background/70 p-4 text-xs whitespace-pre-wrap">
-              {selected.content_markdown}
-            </pre>
+            <div className="rounded-xl border border-primary/25 bg-gradient-to-b from-[#161616] to-[#0f0f0f] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] overflow-hidden xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+              <div className="border-b border-primary/20 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-primary/90">
+                Digest Result
+              </div>
+              <pre className="max-h-[75vh] overflow-y-auto px-5 py-5 text-sm md:text-[15px] leading-7 whitespace-pre-wrap font-sans text-foreground/95 xl:max-h-none xl:min-h-0 xl:flex-1">
+                {selected.content_markdown}
+              </pre>
+            </div>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">Select a digest to view details.</p>
@@ -888,7 +879,6 @@ export default function Hub() {
 
   const [generatingDigest, setGeneratingDigest] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [mobileCopilotOpen, setMobileCopilotOpen] = useState(false);
 
   const inDigestRoute = location.pathname === "/hub/digests";
 
@@ -997,19 +987,19 @@ export default function Hub() {
     setTicketsLoading(true);
     setTicketsError(null);
 
-    Promise.all([
-      supabase
-        .from("ticket_cache")
-        .select("ticket_id,brand,subject,status,priority,requester_email,requester_name,assignee_email,zendesk_updated_at,ticket_url,summary_text")
-        .eq("brand", "omni_one")
-        .order("zendesk_updated_at", { ascending: false })
-        .limit(75),
-      supabase
-        .from("ticket_cache")
-        .select("ticket_id,brand,subject,status,priority,requester_email,requester_name,assignee_email,zendesk_updated_at,ticket_url,summary_text")
-        .eq("brand", "omni_arena")
-        .order("zendesk_updated_at", { ascending: false })
-        .limit(75),
+      Promise.all([
+        supabase
+          .from("ticket_cache")
+          .select("ticket_id,brand,subject,status,priority,requester_email,requester_name,assignee_email,zendesk_updated_at,ticket_url,summary_text,raw_payload")
+          .eq("brand", "omni_one")
+          .order("zendesk_updated_at", { ascending: false })
+          .limit(75),
+        supabase
+          .from("ticket_cache")
+          .select("ticket_id,brand,subject,status,priority,requester_email,requester_name,assignee_email,zendesk_updated_at,ticket_url,summary_text,raw_payload")
+          .eq("brand", "omni_arena")
+          .order("zendesk_updated_at", { ascending: false })
+          .limit(75),
     ])
       .then(async ([omniOneResult, omniArenaResult]) => {
         if (!mounted) return;
@@ -1018,8 +1008,8 @@ export default function Hub() {
           throw new Error(omniOneResult.error?.message || omniArenaResult.error?.message || "Ticket fetch failed.");
         }
 
-        const omniOne = (omniOneResult.data || []) as Ticket[];
-        const omniArena = (omniArenaResult.data || []) as Ticket[];
+        const omniOne = ((omniOneResult.data || []) as Array<Ticket & { raw_payload?: unknown }>).map(normalizeTicketRecord);
+        const omniArena = ((omniArenaResult.data || []) as Array<Ticket & { raw_payload?: unknown }>).map(normalizeTicketRecord);
 
         setOmniOneTickets(omniOne);
         setOmniArenaTickets(omniArena);
@@ -1393,7 +1383,7 @@ export default function Hub() {
     }
   }
 
-  async function handleCopilotAsk(messages: Array<{ role: "user" | "assistant"; content: string }>): Promise<string> {
+  async function handleCopilotAsk(messages: CopilotChatInputMessage[]): Promise<string> {
     const data = await invokeFunctionRobust<CopilotChatResponse>("copilot_chat", {
       messages,
       context: {
@@ -1509,16 +1499,13 @@ export default function Hub() {
             <Button size="icon" variant="outline" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
               <Menu className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="outline" onClick={() => setMobileCopilotOpen(true)} aria-label="Open copilot">
-              <Bot className="h-4 w-4" />
-            </Button>
           </div>
           <span className="hidden lg:inline text-xs text-muted-foreground">{userEmail}</span>
         </div>
       </div>
 
       <div className="container max-w-[1900px] py-6 px-4 relative z-10">
-        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_300px] 2xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]">
           <aside className="hidden lg:block">
             <SideNavigation userEmail={userEmail} onSignOut={() => void handleSignOut()} />
           </aside>
@@ -1609,10 +1596,6 @@ export default function Hub() {
               </>
             )}
           </section>
-
-          <aside className="hidden xl:block">
-            <CopilotPanel onAsk={handleCopilotAsk} />
-          </aside>
         </div>
       </div>
 
@@ -1624,13 +1607,7 @@ export default function Hub() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={mobileCopilotOpen} onOpenChange={setMobileCopilotOpen}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-md">
-          <div className="h-full p-4">
-            <CopilotPanel onAsk={handleCopilotAsk} />
-          </div>
-        </SheetContent>
-      </Sheet>
+      <CopilotChatDock onAsk={handleCopilotAsk} />
 
       <TicketDrawer
         open={ticketDrawerOpen}
