@@ -190,10 +190,13 @@ ZENDESK_API_TOKEN
 ZENDESK_OMNI_ARENA_BRAND_ID
 ZENDESK_OMNI_ONE_BRAND_ID
 
-# AI ticket summarization
+# AI ticket summarization + digest generation
 OPENAI_API_KEY
 OPENAI_MODEL=gpt-4.1-mini
 OPENAI_MODEL_FALLBACKS=gpt-4o-mini,gpt-4.1,gpt-4o
+# Optional prompt overrides (defaults are built-in if omitted)
+SUMMARY_SYSTEM_PROMPT
+DIGEST_SYSTEM_PROMPT
 
 # Slack delivery
 SLACK_WEBHOOK_URL
@@ -211,6 +214,8 @@ npx supabase secrets set \
   OPENAI_API_KEY="<openai-key>" \
   OPENAI_MODEL="gpt-4.1-mini" \
   OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o" \
+  SUMMARY_SYSTEM_PROMPT="<optional-summary-system-prompt>" \
+  DIGEST_SYSTEM_PROMPT="<optional-digest-system-prompt>" \
   SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>"
 ```
 

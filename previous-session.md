@@ -627,3 +627,66 @@ Modified (major):
 - Validation:
   - `npm run test` passed
   - `npm run build` passed.
+
+## Session Continuation (2026-02-25)
+
+### 1) Configurable AI System Prompts + Digest AI Generation
+- Added prompt override support via env vars:
+  - `SUMMARY_SYSTEM_PROMPT`
+  - `DIGEST_SYSTEM_PROMPT`
+- Updated `summarize_ticket` to use the configured summary system prompt (with robust fallback parsing).
+- Converted `create_digest` from template-only generation to OpenAI-backed digest markdown generation while still persisting structured `content_table`.
+- Updated README secret docs to include the new optional prompt variables.
+
+### 2) Ticket Summary Accuracy Fix (Comments + Internal Notes Included)
+- Investigated incorrect summary statements claiming no support responses.
+- Root cause: incremental ticket payload in `ticket_cache.raw_payload` does not reliably contain full thread comments.
+- Updated `summarize_ticket` to fetch full Zendesk comments directly per ticket via:
+  - `/api/v2/tickets/{ticket_id}/comments.json?sort_order=asc`
+- Included both public replies and internal notes in AI input payload.
+- Deployed:
+  - `summarize_ticket`
+
+### 3) Digest Data Fidelity Upgrade
+- Reworked `create_digest` to enrich each ticket from Zendesk before prompt generation:
+  - fetch ticket details (`/api/v2/tickets/{id}.json`)
+  - resolve requester details from users API (`/api/v2/users/{requester_id}.json`) when needed
+  - fetch full comment streams (public + internal) for each ticket
+- Added bounded concurrency for Zendesk enrichment calls to keep latency stable.
+- Included enriched requester fields and comment metadata in prompt payload for better operational summaries.
+- Removed `Ticket Link` from digest table format/prompt/output and clipboard representation.
+- Deployed:
+  - `create_digest`
+
+### 4) Hub UX Updates (Tickets + Digests)
+- Digest reader pane:
+  - expanded to consume more available viewport height
+  - improved readability with larger type, higher line-height, stronger contrast, and branded result container
+  - finalized as an internal scroll area so long digests remain readable without page growth issues
+- Ticket table filtering:
+  - changed `All` to include only active statuses (`new`, `open`, `pending`)
+  - removed `hold` filter button
+  - when no manual selection is made, digest generation now uses currently visible filtered tickets.
+
+### 5) Requester Name Recovery in OA/O1 Tables
+- Added frontend fallback extraction from `raw_payload` so names/emails can still render when top-level columns are empty.
+- Implemented durable backend fix in `sync_zendesk`:
+  - detect missing embedded requester identity
+  - enrich requester from Zendesk users API by `requester_id`
+  - persist enriched `requester_name` and `requester_email` into `ticket_cache`
+- Deployed:
+  - `sync_zendesk`
+
+### 6) Public `/` Page Table Width + Readability
+- Widened public page containers and adjusted week-panel layout breakpoint to reduce cramped table content.
+- Updated schedule table sizing/column constraints:
+  - removed forced horizontal overflow requirements
+  - widened Business Hours and key columns
+  - kept business-hour values on one line where possible.
+
+### 7) Verification Summary
+- `eslint` checks passed for all touched files in latest changes.
+- `npm run test` passed.
+- `npm run build` passed.
+- Edge functions deployed successfully to project:
+  - `ddqacivmenvlidzxxhyv`

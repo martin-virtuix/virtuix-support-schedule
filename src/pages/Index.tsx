@@ -59,7 +59,7 @@ export default function Index() {
     <div className="min-h-screen bg-background relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(86,130,3,0.12),transparent_44%)]" />
       <div className="bg-gradient-to-b from-[#568203]/30 via-[#568203]/10 to-transparent">
-        <div className="container max-w-6xl py-4 px-4 flex items-center justify-between">
+        <div className="container max-w-[1720px] py-4 px-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
             <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
@@ -70,7 +70,7 @@ export default function Index() {
         </div>
       </div>
 
-      <div className="container max-w-6xl py-8 px-4 relative z-10">
+      <div className="container max-w-[1720px] py-8 px-4 relative z-10">
         <header className="text-center mb-8 rounded-2xl border bg-card/70 backdrop-blur-sm px-5 py-7 md:px-8">
           <h1 className="text-3xl md:text-4xl font-semibold tracking-tight mb-3">
             Omni Arena & Omni One Support Schedule
@@ -81,7 +81,7 @@ export default function Index() {
         </header>
 
         {/* Week Panels */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 2xl:grid-cols-2 gap-7 mb-8">
           {/* Current Week */}
           <div className="space-y-4 rounded-2xl border bg-card/50 backdrop-blur-sm p-4 md:p-5">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">

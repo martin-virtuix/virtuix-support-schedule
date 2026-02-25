@@ -14,9 +14,11 @@ type ZendeskTicket = {
   subject?: string | null;
   status?: string | null;
   priority?: string | null;
+  requester_id?: number | null;
   requester?: {
     email?: string | null;
     name?: string | null;
+    phone?: string | null;
   } | null;
   assignee?: {
     email?: string | null;
@@ -26,6 +28,13 @@ type ZendeskTicket = {
   updated_at?: string | null;
   url?: string | null;
   [key: string]: unknown;
+};
+
+type ZendeskUser = {
+  id?: number;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
 };
 
 type ZendeskIncrementalResponse = {
@@ -57,6 +66,58 @@ function parseOptionalInteger(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function parseInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function firstNonEmpty(values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: limit }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await worker(items[index], index);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -105,7 +166,11 @@ function buildTicketUrl(apiUrl: string | null | undefined, ticketNumber: number)
   }
 }
 
-async function fetchZendeskWithRetry(url: string, authHeader: string): Promise<Response> {
+async function fetchZendeskWithRetry(
+  url: string,
+  authHeader: string,
+  options: { allowNotFound?: boolean } = {},
+): Promise<Response> {
   const maxAttempts = 5;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -117,6 +182,10 @@ async function fetchZendeskWithRetry(url: string, authHeader: string): Promise<R
     });
 
     if (response.ok) {
+      return response;
+    }
+
+    if (response.status === 404 && options.allowNotFound) {
       return response;
     }
 
@@ -132,6 +201,25 @@ async function fetchZendeskWithRetry(url: string, authHeader: string): Promise<R
   }
 
   throw new Error("Zendesk retry loop exited unexpectedly");
+}
+
+async function fetchZendeskUser(userId: number, authHeader: string): Promise<ZendeskUser | null> {
+  const response = await fetchZendeskWithRetry(
+    `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/users/${userId}.json`,
+    authHeader,
+    { allowNotFound: true },
+  );
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+  if (!payload.user || typeof payload.user !== "object") {
+    return null;
+  }
+
+  return payload.user as ZendeskUser;
 }
 
 async function getSyncOptions(req: Request): Promise<SyncOptions> {
@@ -293,6 +381,7 @@ serve(async (req) => {
     runId = runData.id as string;
 
     const authHeader = `Basic ${btoa(`${ZENDESK_EMAIL}/token:${ZENDESK_API_TOKEN}`)}`;
+    const requesterCache = new Map<number, Promise<ZendeskUser | null>>();
     let nextPageUrl = `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/incremental/tickets.json?start_time=${cursor}`;
     let lastCursor = cursor;
 
@@ -314,21 +403,46 @@ serve(async (req) => {
       fetchedCount += filteredTickets.length;
 
       if (filteredTickets.length > 0) {
-        const upsertRows = filteredTickets.map((ticket) => ({
-          ticket_id: ticket.id,
-          brand: mapBrand(ticket.brand_id),
-          subject: ticket.subject ?? "",
-          status: ticket.status ?? "new",
-          priority: ticket.priority,
-          requester_email: ticket.requester?.email,
-          requester_name: ticket.requester?.name,
-          assignee_email: ticket.assignee?.email,
-          zendesk_created_at: ticket.created_at,
-          zendesk_updated_at: ticket.updated_at,
-          ticket_url: buildTicketUrl(ticket.url, ticket.id),
-          raw_payload: ticket,
-          synced_at: new Date().toISOString(),
-        }));
+        const upsertRows = await mapWithConcurrency(filteredTickets, 8, async (ticket) => {
+          const embeddedRequesterName = normalizeString(ticket.requester?.name);
+          const embeddedRequesterEmail = normalizeString(ticket.requester?.email);
+          const requesterId = parseInteger(ticket.requester_id);
+
+          let requesterUser: ZendeskUser | null = null;
+          if (requesterId !== null && (!embeddedRequesterName || !embeddedRequesterEmail)) {
+            let userPromise = requesterCache.get(requesterId);
+            if (!userPromise) {
+              userPromise = fetchZendeskUser(requesterId, authHeader);
+              requesterCache.set(requesterId, userPromise);
+            }
+            requesterUser = await userPromise;
+          }
+
+          const requesterName = firstNonEmpty([
+            embeddedRequesterName,
+            normalizeString(requesterUser?.name),
+          ]);
+          const requesterEmail = firstNonEmpty([
+            embeddedRequesterEmail,
+            normalizeString(requesterUser?.email),
+          ]);
+
+          return {
+            ticket_id: ticket.id,
+            brand: mapBrand(ticket.brand_id),
+            subject: ticket.subject ?? "",
+            status: ticket.status ?? "new",
+            priority: ticket.priority,
+            requester_email: requesterEmail,
+            requester_name: requesterName,
+            assignee_email: ticket.assignee?.email,
+            zendesk_created_at: ticket.created_at,
+            zendesk_updated_at: ticket.updated_at,
+            ticket_url: buildTicketUrl(ticket.url, ticket.id),
+            raw_payload: ticket,
+            synced_at: new Date().toISOString(),
+          };
+        });
 
         const { error: upsertError } = await supabaseAdmin
           .from("ticket_cache")
