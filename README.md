@@ -17,6 +17,9 @@ A Vite/React app with two experiences:
 - Two Zendesk-backed ticket tables:
   - Omni One tickets
   - Omni Arena tickets
+- Documents workspace (`/hub/documents`) for PDF knowledge files stored in Supabase Storage, split by:
+  - `omni_one` folder
+  - `omni_arena` folder
 - Features:
   - Status filters (`all`, `open`, `pending`, `new`)
   - Status badge colors (Zendesk-like)
@@ -70,6 +73,12 @@ Configured project ref:
 VITE_SUPABASE_PROJECT_ID="ddqacivmenvlidzxxhyv"
 VITE_SUPABASE_URL="https://ddqacivmenvlidzxxhyv.supabase.co"
 VITE_SUPABASE_PUBLISHABLE_KEY="<supabase-anon-key>"
+```
+
+Optional (defaults to `support-documents`):
+
+```bash
+VITE_SUPPORT_DOCUMENTS_BUCKET="support-documents"
 ```
 
 Optional (only for Zendesk link fallback in UI):

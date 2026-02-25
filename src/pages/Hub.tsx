@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
-import { Copy, Loader2, Menu, RefreshCw, Send, Sparkles } from "lucide-react";
+import { Copy, Download, ExternalLink, FileText, Loader2, Menu, RefreshCw, Send, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,6 +29,10 @@ import omniOneLogo from "@/assets/omnione_logo_color.png";
 const ALLOWED_DOMAIN = "@virtuix.com";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPPORT_DOCUMENTS_BUCKET = import.meta.env.VITE_SUPPORT_DOCUMENTS_BUCKET || "support-documents";
+const SUPPORT_DOCUMENTS_BRANDS = ["omni_one", "omni_arena"] as const;
+
+type DocumentBrand = (typeof SUPPORT_DOCUMENTS_BRANDS)[number];
 
 type SyncSummary = {
   finishedAt: string | null;
@@ -70,6 +74,14 @@ type JwtClaims = {
 type AccessTokenContext = {
   token: string;
   claims: JwtClaims;
+};
+
+type SupportDocument = {
+  brand: DocumentBrand;
+  path: string;
+  name: string;
+  updatedAt: string | null;
+  sizeBytes: number | null;
 };
 
 const ACTIVE_TICKET_STATUSES = new Set(["new", "open", "pending"]);
@@ -145,6 +157,113 @@ function formatDateTime(value: string | null): string {
   }
 
   return date.toLocaleString();
+}
+
+function formatFileSize(sizeBytes: number | null): string {
+  if (typeof sizeBytes !== "number" || Number.isNaN(sizeBytes) || sizeBytes < 0) {
+    return "Unknown size";
+  }
+
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = sizeBytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function toOptionalNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function trimLeadingSlashes(path: string): string {
+  return path.replace(/^\/+/, "");
+}
+
+function normalizeStoragePath(path: string): string {
+  return trimLeadingSlashes(path).replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+}
+
+function resolveStorageItemPath(folder: string, itemName: string, brand: DocumentBrand): string {
+  const rawName = trimLeadingSlashes(itemName);
+  if (rawName.startsWith(`${brand}/`)) {
+    return rawName;
+  }
+
+  const rawFolder = trimLeadingSlashes(folder);
+  return `${rawFolder}/${itemName}`.replace(/^\/+/, "");
+}
+
+function getDocumentRelativePath(path: string, brand: DocumentBrand): string | null {
+  const normalizedPath = normalizeStoragePath(path);
+  const prefix = `${brand}/`;
+  if (!normalizedPath.startsWith(prefix)) {
+    return null;
+  }
+  return normalizedPath.slice(prefix.length);
+}
+
+function getDocumentTopLevelFolder(path: string, brand: DocumentBrand): string | null {
+  const relativePath = getDocumentRelativePath(path, brand);
+  if (!relativePath) {
+    return null;
+  }
+
+  const segments = relativePath.split("/").filter((segment) => segment.length > 0);
+  if (segments.length <= 1) {
+    return null;
+  }
+  return segments[0];
+}
+
+function getFolderOptionsForBrand(documents: SupportDocument[], brand: DocumentBrand): string[] {
+  const folders = new Set<string>();
+  documents.forEach((document) => {
+    const folder = getDocumentTopLevelFolder(document.path, brand);
+    if (folder) {
+      folders.add(folder);
+    }
+  });
+  return Array.from(folders).sort((a, b) => a.localeCompare(b));
+}
+
+function filterDocumentsByFolder(
+  documents: SupportDocument[],
+  brand: DocumentBrand,
+  topLevelFolder: string | null,
+): SupportDocument[] {
+  if (!topLevelFolder) {
+    return documents;
+  }
+  return documents.filter((document) => getDocumentTopLevelFolder(document.path, brand) === topLevelFolder);
+}
+
+function getFirstDocumentPath(
+  documentsByBrand: Record<DocumentBrand, SupportDocument[]>,
+  brand: DocumentBrand,
+  topLevelFolder: string | null,
+): string | null {
+  const byFolder = filterDocumentsByFolder(documentsByBrand[brand] || [], brand, topLevelFolder);
+  if (byFolder.length > 0) {
+    return byFolder[0].path;
+  }
+  return (documentsByBrand[brand] || [])[0]?.path || null;
 }
 
 function statusPillClasses(status: string): string {
@@ -480,6 +599,9 @@ function SideNavigation({ userEmail, onSignOut }: { userEmail: string; onSignOut
         </NavLink>
         <NavLink to="/hub/digests" className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}>
           Digests
+        </NavLink>
+        <NavLink to="/hub/documents" className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}>
+          Documents
         </NavLink>
       </nav>
       <div className="mt-auto space-y-3">
@@ -837,6 +959,221 @@ function DigestsPane({
   );
 }
 
+function DocumentsPane({
+  documentsByBrand,
+  loading,
+  error,
+  activeBrand,
+  activeTopLevelFolder,
+  selectedDocumentPath,
+  previewUrl,
+  previewLoading,
+  previewError,
+  downloadingDocumentPath,
+  onRefresh,
+  onSelectBrand,
+  onSelectTopLevelFolder,
+  onSelectDocument,
+  onDownloadDocument,
+}: {
+  documentsByBrand: Record<DocumentBrand, SupportDocument[]>;
+  loading: boolean;
+  error: string | null;
+  activeBrand: DocumentBrand;
+  activeTopLevelFolder: string | null;
+  selectedDocumentPath: string | null;
+  previewUrl: string | null;
+  previewLoading: boolean;
+  previewError: string | null;
+  downloadingDocumentPath: string | null;
+  onRefresh: () => Promise<void>;
+  onSelectBrand: (brand: DocumentBrand) => void;
+  onSelectTopLevelFolder: (folder: string | null) => void;
+  onSelectDocument: (document: SupportDocument) => void;
+  onDownloadDocument: (document: SupportDocument) => Promise<void>;
+}) {
+  const brandMeta: Record<DocumentBrand, { label: string; logo: string }> = {
+    omni_one: { label: "Omni One", logo: omniOneLogo },
+    omni_arena: { label: "Omni Arena", logo: omniArenaLogo },
+  };
+
+  const allDocuments = useMemo(
+    () => SUPPORT_DOCUMENTS_BRANDS.flatMap((brand) => documentsByBrand[brand] || []),
+    [documentsByBrand],
+  );
+  const activeDocuments = documentsByBrand[activeBrand] || [];
+  const activeFolderOptions = useMemo(
+    () => getFolderOptionsForBrand(activeDocuments, activeBrand),
+    [activeBrand, activeDocuments],
+  );
+  const filteredDocuments = useMemo(
+    () => filterDocumentsByFolder(activeDocuments, activeBrand, activeTopLevelFolder),
+    [activeBrand, activeDocuments, activeTopLevelFolder],
+  );
+  const selectedDocument = allDocuments.find((document) => document.path === selectedDocumentPath) || null;
+
+  return (
+    <section className="grid gap-4 xl:h-[calc(100vh-15rem)] xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="rounded-2xl border bg-card/50 p-4 backdrop-blur-sm xl:flex xl:min-h-0 xl:h-full xl:flex-col">
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Documents</h2>
+          <Button size="sm" variant="outline" onClick={() => void onRefresh()} disabled={loading}>
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Refresh
+          </Button>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          {SUPPORT_DOCUMENTS_BRANDS.map((brand) => (
+            <Button
+              key={brand}
+              size="sm"
+              variant={activeBrand === brand ? "secondary" : "ghost"}
+              className="h-9 gap-2"
+              onClick={() => onSelectBrand(brand)}
+            >
+              <img src={brandMeta[brand].logo} alt={brandMeta[brand].label} className="h-4 w-auto" />
+              {brandMeta[brand].label}
+            </Button>
+          ))}
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant={activeTopLevelFolder === null ? "secondary" : "ghost"}
+            className="h-8"
+            onClick={() => onSelectTopLevelFolder(null)}
+          >
+            All folders
+          </Button>
+          {activeFolderOptions.map((folder) => (
+            <Button
+              key={folder}
+              size="sm"
+              variant={activeTopLevelFolder === folder ? "secondary" : "ghost"}
+              className="h-8"
+              onClick={() => onSelectTopLevelFolder(folder)}
+            >
+              {folder}
+            </Button>
+          ))}
+        </div>
+
+        <p className="mb-3 text-xs text-muted-foreground">
+          Bucket: <span className="font-medium text-foreground">{SUPPORT_DOCUMENTS_BUCKET}</span> • Expected folders:
+          {" "}omni_one, omni_arena
+        </p>
+
+        <div className="xl:min-h-0 xl:flex-1 xl:overflow-auto space-y-2 pr-1">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading documents...</p>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : filteredDocuments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {activeTopLevelFolder
+                ? `No PDF documents found in ${activeTopLevelFolder}.`
+                : `No PDF documents found for ${brandMeta[activeBrand].label}.`}
+            </p>
+          ) : (
+            filteredDocuments.map((document) => (
+              <button
+                key={document.path}
+                className={[
+                  "w-full rounded-lg border px-3 py-2 text-left transition",
+                  selectedDocumentPath === document.path ? "bg-muted border-primary/40" : "hover:bg-muted/40",
+                ].join(" ")}
+                onClick={() => onSelectDocument(document)}
+              >
+                <div className="flex items-start gap-2">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{document.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Updated {formatDateTime(document.updatedAt)} • {formatFileSize(document.sizeBytes)}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border bg-card/50 p-4 backdrop-blur-sm xl:flex xl:min-h-0 xl:h-full xl:flex-col">
+        {selectedDocument ? (
+          <div className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold">{selectedDocument.name}</h2>
+                <p className="text-xs text-muted-foreground">Path: {selectedDocument.path}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void onDownloadDocument(selectedDocument)}
+                  disabled={downloadingDocumentPath === selectedDocument.path}
+                >
+                  {downloadingDocumentPath === selectedDocument.path ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Download
+                </Button>
+                {previewUrl ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <a href={previewUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Open PDF
+                    </a>
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="relative min-h-[68vh] overflow-hidden rounded-xl border bg-background/70 shadow-inner xl:min-h-0 xl:flex-1">
+              {previewLoading ? (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading preview...
+                </div>
+              ) : null}
+
+              {!previewLoading && previewError ? (
+                <div className="flex h-full items-center justify-center p-6 text-sm text-destructive">
+                  {previewError}
+                </div>
+              ) : null}
+
+              {!previewLoading && !previewError && previewUrl ? (
+                <iframe
+                  key={previewUrl}
+                  src={previewUrl}
+                  title={`Preview ${selectedDocument.name}`}
+                  className="h-[68vh] w-full xl:h-full"
+                />
+              ) : null}
+
+              {!previewLoading && !previewError && !previewUrl ? (
+                <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+                  Preview unavailable for this file.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+            Select a PDF document to preview it.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function Hub() {
   const { toast } = useToast();
   const location = useLocation();
@@ -872,6 +1209,23 @@ export default function Hub() {
   const [digestsError, setDigestsError] = useState<string | null>(null);
   const [selectedDigestId, setSelectedDigestId] = useState<string | null>(null);
 
+  const [documentsByBrand, setDocumentsByBrand] = useState<Record<DocumentBrand, SupportDocument[]>>({
+    omni_one: [],
+    omni_arena: [],
+  });
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [documentsPreviewError, setDocumentsPreviewError] = useState<string | null>(null);
+  const [activeDocumentsBrand, setActiveDocumentsBrand] = useState<DocumentBrand>("omni_one");
+  const [documentsFolderByBrand, setDocumentsFolderByBrand] = useState<Record<DocumentBrand, string | null>>({
+    omni_one: null,
+    omni_arena: null,
+  });
+  const [selectedDocumentPath, setSelectedDocumentPath] = useState<string | null>(null);
+  const [selectedDocumentPreviewUrl, setSelectedDocumentPreviewUrl] = useState<string | null>(null);
+  const [documentsPreviewLoading, setDocumentsPreviewLoading] = useState(false);
+  const [downloadLoadingPath, setDownloadLoadingPath] = useState<string | null>(null);
+
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<SyncSummary | null>(null);
@@ -881,6 +1235,8 @@ export default function Hub() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const inDigestRoute = location.pathname === "/hub/digests";
+  const inDocumentsRoute = location.pathname === "/hub/documents";
+  const inTicketRoute = !inDigestRoute && !inDocumentsRoute;
 
   async function invokeFunctionRobust<T>(name: string, body: Record<string, unknown>): Promise<T> {
     try {
@@ -899,6 +1255,193 @@ export default function Hub() {
         const retryMessage = retryError instanceof Error ? retryError.message : "Unknown retry error.";
         throw new Error(`${primaryMessage} | Retry failed: ${retryMessage}`);
       }
+    }
+  }
+
+  async function listPdfDocumentsForBrand(brand: DocumentBrand): Promise<SupportDocument[]> {
+    const collectedByPath = new Map<string, SupportDocument>();
+    const queue: string[] = [brand, `${brand}/`, `${brand}//`];
+    const queuedFolders = new Set(queue);
+    const visitedFolders = new Set<string>();
+
+    function enqueueFolder(rawPath: string) {
+      const nextFolder = trimLeadingSlashes(rawPath);
+      if (nextFolder.length === 0) return;
+      if (queuedFolders.has(nextFolder) || visitedFolders.has(nextFolder)) return;
+      queue.push(nextFolder);
+      queuedFolders.add(nextFolder);
+    }
+
+    while (queue.length > 0) {
+      const folder = queue.shift();
+      if (!folder) continue;
+      queuedFolders.delete(folder);
+
+      if (visitedFolders.has(folder)) {
+        continue;
+      }
+      visitedFolders.add(folder);
+      if (visitedFolders.size > 5000) {
+        throw new Error(`Stopped document listing for ${brand}: too many folder entries.`);
+      }
+
+      let offset = 0;
+      let done = false;
+      let pageCount = 0;
+      while (!done) {
+        const { data, error } = await supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).list(folder, {
+          limit: 100,
+          offset,
+          sortBy: { column: "name", order: "asc" },
+        });
+
+        if (error) {
+          throw new Error(`Failed to list documents for ${brand}: ${error.message}`);
+        }
+
+        const page = data || [];
+        for (const item of page) {
+          const rawName = item.name || "";
+          const lowerName = rawName.toLowerCase();
+          const isPdf = lowerName.endsWith(".pdf");
+          const metadata = asRecord(item.metadata);
+          const sizeBytes = toOptionalNumber(metadata?.size);
+          const isKnownFile =
+            !!item.id ||
+            sizeBytes !== null ||
+            normalizeOptionalString(item.updated_at) !== null ||
+            normalizeOptionalString(item.created_at) !== null;
+          const looksLikeFolder =
+            !isPdf &&
+            (rawName.trim().length === 0 || (!isKnownFile && !rawName.includes(".")));
+
+          if (looksLikeFolder) {
+            const childFolder = resolveStorageItemPath(folder, rawName, brand);
+            enqueueFolder(childFolder);
+
+            // Some legacy uploads contain an empty path segment (e.g. "omni_arena//file.pdf").
+            // Probe deeper slashed prefixes so those objects are still discoverable.
+            if (rawName.trim().length === 0) {
+              enqueueFolder(`${folder}/`);
+              enqueueFolder(`${folder}//`);
+            }
+            continue;
+          }
+
+          if (!isPdf) {
+            continue;
+          }
+
+          const itemPath = resolveStorageItemPath(folder, rawName, brand);
+          const normalizedPath = normalizeStoragePath(itemPath);
+          if (!normalizedPath.startsWith(`${brand}/`)) {
+            continue;
+          }
+
+          const updatedAt = firstNonEmptyString(
+            normalizeOptionalString(item.updated_at),
+            normalizeOptionalString(item.created_at),
+            normalizeOptionalString(item.last_accessed_at),
+          );
+
+          if (!collectedByPath.has(itemPath)) {
+            collectedByPath.set(itemPath, {
+              brand,
+              path: itemPath,
+              name: rawName,
+              updatedAt,
+              sizeBytes,
+            });
+          }
+        }
+
+        if (page.length < 100) {
+          done = true;
+        } else {
+          offset += 100;
+          pageCount += 1;
+          if (pageCount > 1000) {
+            throw new Error(`Too many pages while listing ${brand} documents.`);
+          }
+        }
+      }
+    }
+
+    return Array.from(collectedByPath.values()).sort((a, b) => {
+      const updatedA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const updatedB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      if (updatedA !== updatedB) {
+        return updatedB - updatedA;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  async function refreshDocuments() {
+    setDocumentsLoading(true);
+    setDocumentsError(null);
+
+    try {
+      const [omniOneDocs, omniArenaDocs] = await Promise.all([
+        listPdfDocumentsForBrand("omni_one"),
+        listPdfDocumentsForBrand("omni_arena"),
+      ]);
+
+      const nextDocumentsByBrand: Record<DocumentBrand, SupportDocument[]> = {
+        omni_one: omniOneDocs,
+        omni_arena: omniArenaDocs,
+      };
+      setDocumentsByBrand(nextDocumentsByBrand);
+
+      const nextFolderByBrand: Record<DocumentBrand, string | null> = {
+        omni_one: documentsFolderByBrand.omni_one,
+        omni_arena: documentsFolderByBrand.omni_arena,
+      };
+      SUPPORT_DOCUMENTS_BRANDS.forEach((brand) => {
+        const availableFolders = getFolderOptionsForBrand(nextDocumentsByBrand[brand], brand);
+        const currentFolder = nextFolderByBrand[brand];
+        if (currentFolder && !availableFolders.includes(currentFolder)) {
+          nextFolderByBrand[brand] = null;
+        }
+      });
+      setDocumentsFolderByBrand(nextFolderByBrand);
+
+      const allDocumentPaths = new Set(
+        [...omniOneDocs, ...omniArenaDocs].map((document) => document.path),
+      );
+      setSelectedDocumentPath((current) => {
+        if (current && allDocumentPaths.has(current)) {
+          return current;
+        }
+
+        const preferredPath = getFirstDocumentPath(
+          nextDocumentsByBrand,
+          activeDocumentsBrand,
+          nextFolderByBrand[activeDocumentsBrand],
+        );
+        if (preferredPath) {
+          return preferredPath;
+        }
+
+        return (
+          getFirstDocumentPath(nextDocumentsByBrand, "omni_one", nextFolderByBrand.omni_one) ||
+          getFirstDocumentPath(nextDocumentsByBrand, "omni_arena", nextFolderByBrand.omni_arena) ||
+          null
+        );
+      });
+
+      setActiveDocumentsBrand((current) => {
+        if (current === "omni_one" && omniOneDocs.length > 0) return current;
+        if (current === "omni_arena" && omniArenaDocs.length > 0) return current;
+        if (omniOneDocs.length > 0) return "omni_one";
+        if (omniArenaDocs.length > 0) return "omni_arena";
+        return current;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load documents.";
+      setDocumentsError(message);
+    } finally {
+      setDocumentsLoading(false);
     }
   }
 
@@ -1087,6 +1630,63 @@ export default function Hub() {
 
   useEffect(() => {
     if (!authorized) {
+      setDocumentsByBrand({ omni_one: [], omni_arena: [] });
+      setDocumentsFolderByBrand({ omni_one: null, omni_arena: null });
+      setDocumentsError(null);
+      setDocumentsPreviewError(null);
+      setSelectedDocumentPath(null);
+      setSelectedDocumentPreviewUrl(null);
+      return;
+    }
+
+    if (!inDocumentsRoute) {
+      return;
+    }
+
+    void refreshDocuments();
+  }, [authorized, inDocumentsRoute, refreshKey]);
+
+  useEffect(() => {
+    if (!authorized || !inDocumentsRoute || !selectedDocumentPath) {
+      setSelectedDocumentPreviewUrl(null);
+      setDocumentsPreviewError(null);
+      setDocumentsPreviewLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    setDocumentsPreviewLoading(true);
+    setDocumentsPreviewError(null);
+
+    supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).createSignedUrl(selectedDocumentPath, 60 * 60 * 12)
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        if (error) {
+          setSelectedDocumentPreviewUrl(null);
+          setDocumentsPreviewError(error.message);
+          return;
+        }
+        setSelectedDocumentPreviewUrl(data?.signedUrl || null);
+      })
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        const message = error instanceof Error ? error.message : "Failed to create preview link.";
+        setSelectedDocumentPreviewUrl(null);
+        setDocumentsPreviewError(message);
+      })
+      .finally(() => {
+        if (mounted) {
+          setDocumentsPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [authorized, inDocumentsRoute, selectedDocumentPath]);
+
+  useEffect(() => {
+    if (!authorized) {
       setLastSync(null);
       return;
     }
@@ -1231,6 +1831,47 @@ export default function Hub() {
     setTicketDrawerOpen(true);
     if (!summaryMap[ticket.ticket_id] && !summaryLoadingTicketId) {
       void refreshTicketSummary(ticket.ticket_id, false);
+    }
+  }
+
+  function handleSelectDocumentsBrand(brand: DocumentBrand) {
+    setActiveDocumentsBrand(brand);
+    setSelectedDocumentPath(getFirstDocumentPath(documentsByBrand, brand, documentsFolderByBrand[brand]));
+  }
+
+  function handleSelectDocumentsTopLevelFolder(folder: string | null) {
+    setDocumentsFolderByBrand((previous) => ({ ...previous, [activeDocumentsBrand]: folder }));
+    const matchingDocuments = filterDocumentsByFolder(documentsByBrand[activeDocumentsBrand] || [], activeDocumentsBrand, folder);
+    setSelectedDocumentPath(matchingDocuments[0]?.path || null);
+  }
+
+  function handleSelectDocument(file: SupportDocument) {
+    setActiveDocumentsBrand(file.brand);
+    setSelectedDocumentPath(file.path);
+  }
+
+  async function handleDownloadDocument(file: SupportDocument) {
+    setDownloadLoadingPath(file.path);
+
+    try {
+      const { data, error } = await supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).download(file.path);
+      if (error || !data) {
+        throw new Error(error?.message || "Unable to download document.");
+      }
+
+      const objectUrl = URL.createObjectURL(data);
+      const link = window.document.createElement("a");
+      link.href = objectUrl;
+      link.download = file.name;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Download failed.";
+      toast({ title: "Download failed", description: message, variant: "destructive" });
+    } finally {
+      setDownloadLoadingPath(null);
     }
   }
 
@@ -1530,11 +2171,24 @@ export default function Hub() {
                     {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     {syncLoading ? "Syncing..." : "Sync Zendesk"}
                   </Button>
-                  {!inDigestRoute ? (
-                    <Button variant="outline" onClick={() => navigate("/hub/digests")}>Open Digests</Button>
-                  ) : (
-                    <Button variant="outline" onClick={() => navigate("/hub")}>Open Tickets</Button>
-                  )}
+                  {inTicketRoute ? (
+                    <>
+                      <Button variant="outline" onClick={() => navigate("/hub/digests")}>Open Digests</Button>
+                      <Button variant="outline" onClick={() => navigate("/hub/documents")}>Open Documents</Button>
+                    </>
+                  ) : null}
+                  {inDigestRoute ? (
+                    <>
+                      <Button variant="outline" onClick={() => navigate("/hub")}>Open Tickets</Button>
+                      <Button variant="outline" onClick={() => navigate("/hub/documents")}>Open Documents</Button>
+                    </>
+                  ) : null}
+                  {inDocumentsRoute ? (
+                    <>
+                      <Button variant="outline" onClick={() => navigate("/hub")}>Open Tickets</Button>
+                      <Button variant="outline" onClick={() => navigate("/hub/digests")}>Open Digests</Button>
+                    </>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -1549,6 +2203,24 @@ export default function Hub() {
                 onSendToSlack={sendDigestToSlack}
                 onCopyMarkdown={copyDigestMarkdown}
                 onCopyTable={copyDigestTable}
+              />
+            ) : inDocumentsRoute ? (
+              <DocumentsPane
+                documentsByBrand={documentsByBrand}
+                loading={documentsLoading}
+                error={documentsError}
+                activeBrand={activeDocumentsBrand}
+                activeTopLevelFolder={documentsFolderByBrand[activeDocumentsBrand]}
+                selectedDocumentPath={selectedDocumentPath}
+                previewUrl={selectedDocumentPreviewUrl}
+                previewLoading={documentsPreviewLoading}
+                previewError={documentsPreviewError}
+                downloadingDocumentPath={downloadLoadingPath}
+                onRefresh={refreshDocuments}
+                onSelectBrand={handleSelectDocumentsBrand}
+                onSelectTopLevelFolder={handleSelectDocumentsTopLevelFolder}
+                onSelectDocument={handleSelectDocument}
+                onDownloadDocument={handleDownloadDocument}
               />
             ) : (
               <>
