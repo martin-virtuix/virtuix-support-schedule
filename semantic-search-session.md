@@ -404,3 +404,14 @@ Changes:
 2. Tune `top_k` and `min_similarity` defaults based on observed result quality.
 3. Integrate retrieval context into `copilot_chat` for cited RAG responses.
 4. Collect stakeholder UI feedback and apply any final spacing/contrast micro-adjustments.
+
+### Iteration 20: Active Ticket Status Reconciliation Hardening
+Changes:
+- Kept `/hub` active-ticket definition unchanged (`new`, `open`, `pending`).
+- Hardened `supabase/functions/sync_zendesk/index.ts` to reconcile currently active cache tickets against live Zendesk ticket records after each sync run.
+- Added batched Zendesk `show_many` fetch (100 IDs per call, concurrent batches) and upsert reconciliation into `ticket_cache`.
+- Added `reconcile_active` sync option (default `true`) for GET/POST triggers and response diagnostics.
+- Extended sync response with reconciliation diagnostics: checked/upserted active ticket counts.
+
+Validation:
+- `~/.deno/bin/deno check supabase/functions/sync_zendesk/index.ts` passed.

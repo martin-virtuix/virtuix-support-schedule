@@ -10,6 +10,7 @@ type SyncOptions = {
   backfillYear: boolean;
   backfillDays?: number;
   maxPages?: number;
+  reconcileActive: boolean;
 };
 
 type ZendeskTicket = {
@@ -45,6 +46,17 @@ type ZendeskIncrementalResponse = {
   end_time?: number;
   end_of_stream?: boolean;
   next_page?: string | null;
+};
+
+type ZendeskShowManyResponse = {
+  tickets?: ZendeskTicket[];
+};
+
+type TicketCacheActiveRow = {
+  ticket_id: number;
+  requester_email?: string | null;
+  requester_name?: string | null;
+  assignee_email?: string | null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -146,6 +158,14 @@ async function mapWithConcurrency<T, R>(
 
   await Promise.all(runners);
   return results;
+}
+
+function chunkArray<T>(items: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -250,6 +270,28 @@ async function fetchZendeskUser(userId: number, authHeader: string): Promise<Zen
   return payload.user as ZendeskUser;
 }
 
+async function fetchZendeskTicketsByIds(ticketIds: number[], authHeader: string): Promise<ZendeskTicket[]> {
+  const uniqueIds = Array.from(new Set(ticketIds.filter((id) => Number.isFinite(id) && id > 0)));
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+
+  const idChunks = chunkArray(uniqueIds, 100);
+  const fetchedTickets = await mapWithConcurrency(idChunks, 3, async (ids) => {
+    const response = await fetchZendeskWithRetry(
+      `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/show_many.json?ids=${ids.join(",")}`,
+      authHeader,
+    );
+
+    const payload = await response.json().catch(() => ({} as ZendeskShowManyResponse));
+    return Array.isArray(payload.tickets) ? payload.tickets : [];
+  });
+
+  return fetchedTickets
+    .flat()
+    .filter((ticket): ticket is ZendeskTicket => typeof ticket?.id === "number");
+}
+
 async function getSyncOptions(req: Request): Promise<SyncOptions> {
   const url = new URL(req.url);
 
@@ -259,12 +301,14 @@ async function getSyncOptions(req: Request): Promise<SyncOptions> {
     const backfillYear = parseBoolean(url.searchParams.get("backfill_year")) === true;
     const backfillDays = parseOptionalPositiveInteger(url.searchParams.get("backfill_days"));
     const maxPages = parseOptionalPositiveInteger(url.searchParams.get("max_pages"));
+    const reconcileActive = parseBoolean(url.searchParams.get("reconcile_active")) !== false;
     return {
       brand: brand === "omni_one" || brand === "omni_arena" ? brand : "all",
       startTime,
       backfillYear,
       backfillDays,
       maxPages,
+      reconcileActive,
     };
   }
 
@@ -274,6 +318,7 @@ async function getSyncOptions(req: Request): Promise<SyncOptions> {
   const backfillYear = parseBoolean(body.backfill_year) === true;
   const backfillDays = parseOptionalPositiveInteger(body.backfill_days);
   const maxPages = parseOptionalPositiveInteger(body.max_pages);
+  const reconcileActive = parseBoolean(body.reconcile_active) !== false;
 
   return {
     brand: requestedBrand === "omni_one" || requestedBrand === "omni_arena" ? requestedBrand : "all",
@@ -281,6 +326,7 @@ async function getSyncOptions(req: Request): Promise<SyncOptions> {
     backfillYear,
     backfillDays,
     maxPages,
+    reconcileActive,
   };
 }
 
@@ -327,6 +373,8 @@ serve(async (req) => {
   let runId: string | null = null;
   let fetchedCount = 0;
   let upsertedCount = 0;
+  let reconciledCheckedCount = 0;
+  let reconciledUpsertedCount = 0;
   const staleRunThresholdMs = (options.backfillYear ? 120 : 20) * 60 * 1000;
   let lastCursorForError: number | null = null;
   let initialCursor: number | null = null;
@@ -542,6 +590,75 @@ serve(async (req) => {
       }
     }
 
+    if (options.reconcileActive) {
+      let activeTicketQuery = supabaseAdmin
+        .from("ticket_cache")
+        .select("ticket_id,requester_email,requester_name,assignee_email")
+        .in("status", ["new", "open", "pending"])
+        .limit(5000);
+
+      if (options.brand !== "all") {
+        activeTicketQuery = activeTicketQuery.eq("brand", options.brand);
+      }
+
+      const { data: activeRows, error: activeRowsError } = await activeTicketQuery;
+      if (activeRowsError) {
+        throw new Error(`Failed to fetch active tickets for status reconciliation: ${activeRowsError.message}`);
+      }
+
+      const cachedActiveRows = ((activeRows ?? []) as TicketCacheActiveRow[])
+        .filter((row) => typeof row.ticket_id === "number");
+      const activeTicketIds = cachedActiveRows.map((row) => row.ticket_id);
+      reconciledCheckedCount = activeTicketIds.length;
+
+      if (activeTicketIds.length > 0) {
+        const cachedByTicketId = new Map<number, TicketCacheActiveRow>();
+        cachedActiveRows.forEach((row) => {
+          cachedByTicketId.set(row.ticket_id, row);
+        });
+
+        const zendeskTickets = await fetchZendeskTicketsByIds(activeTicketIds, authHeader);
+        const syncedAt = new Date().toISOString();
+        const reconcileRows = zendeskTickets.map((ticket) => {
+          const currentRow = cachedByTicketId.get(ticket.id);
+          const embeddedRequesterName = normalizeString(ticket.requester?.name);
+          const embeddedRequesterEmail = normalizeString(ticket.requester?.email);
+
+          return {
+            ticket_id: ticket.id,
+            brand: mapBrand(ticket.brand_id),
+            subject: ticket.subject ?? "",
+            status: ticket.status ?? "new",
+            priority: ticket.priority,
+            requester_email: firstNonEmpty([embeddedRequesterEmail, normalizeString(currentRow?.requester_email)]),
+            requester_name: firstNonEmpty([embeddedRequesterName, normalizeString(currentRow?.requester_name)]),
+            assignee_email: firstNonEmpty([
+              normalizeString(ticket.assignee?.email),
+              normalizeString(currentRow?.assignee_email),
+            ]),
+            zendesk_created_at: ticket.created_at ?? ticket.updated_at,
+            zendesk_updated_at: ticket.updated_at,
+            ticket_url: buildTicketUrl(ticket.url, ticket.id),
+            raw_payload: ticket,
+            synced_at: syncedAt,
+          };
+        });
+
+        if (reconcileRows.length > 0) {
+          const { error: reconcileError } = await supabaseAdmin
+            .from("ticket_cache")
+            .upsert(reconcileRows, { onConflict: "ticket_id" });
+
+          if (reconcileError) {
+            throw new Error(`Supabase active-status reconcile upsert error: ${reconcileError.message}`);
+          }
+
+          reconciledUpsertedCount = reconcileRows.length;
+          upsertedCount += reconcileRows.length;
+        }
+      }
+    }
+
     const hasMore = Boolean(nextPageUrl);
     const { error: runUpdateError } = await supabaseAdmin
       .from("zendesk_sync_runs")
@@ -566,8 +683,11 @@ serve(async (req) => {
       run_id: runId,
       brand: options.brand,
       backfill_year: options.backfillYear,
+      reconcile_active: options.reconcileActive,
       tickets_fetched: fetchedCount,
       tickets_upserted: upsertedCount,
+      active_reconciliation_checked: reconciledCheckedCount,
+      active_reconciliation_upserted: reconciledUpsertedCount,
       cursor: lastCursor,
       max_pages: maxPages,
       pages_processed: page,
