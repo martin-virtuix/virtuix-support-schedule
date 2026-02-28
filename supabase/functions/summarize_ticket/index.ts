@@ -172,7 +172,7 @@ async function fetchTicketComments(ticketId: number): Promise<Array<Record<strin
     const response = await fetchZendeskWithRetry(nextPage, authHeader);
     const payload = await response.json().catch(() => ({} as Record<string, unknown>));
 
-    const comments = Array.isArray(payload.comments) ? payload.comments : [];
+    const comments: unknown[] = Array.isArray(payload.comments) ? payload.comments : [];
     comments.forEach((item) => {
       if (!item || typeof item !== "object") return;
       const comment = item as Record<string, unknown>;

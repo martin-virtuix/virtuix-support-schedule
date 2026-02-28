@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
+import { ArrowUpDown } from "lucide-react";
 import type { ArenaSite } from "@/lib/scheduleData";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface ArenaSitesTableProps {
   sites: ArenaSite[];
@@ -25,7 +28,7 @@ function Badge({ status }: { status: string }) {
   return (
     <span
       className={[
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-[0.08em] whitespace-nowrap",
         statusBadgeClasses(status),
       ].join(" ")}
     >
@@ -84,75 +87,62 @@ export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps)
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-border/65 bg-background/45 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input
+          <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search venue, notes, contact..."
-            className="h-9 w-full sm:w-[320px] rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            className="h-8 w-full sm:w-[300px]"
           />
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setStatusFilter("all")}
-              className={["h-9 rounded-md border px-3 text-sm", statusFilter === "all" ? "bg-muted" : "bg-background"].join(" ")}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setStatusFilter("current")}
-              className={[
-                "h-9 rounded-md border px-3 text-sm",
-                statusFilter === "current" ? "bg-muted" : "bg-background",
-              ].join(" ")}
-            >
-              Current
-            </button>
-            <button
-              onClick={() => setStatusFilter("no-support")}
-              className={[
-                "h-9 rounded-md border px-3 text-sm",
-                statusFilter === "no-support" ? "bg-muted" : "bg-background",
-              ].join(" ")}
-            >
-              No Support
-            </button>
+            {([
+              { key: "all", label: "All" },
+              { key: "current", label: "Current" },
+              { key: "no-support", label: "No Support" },
+            ] as const).map((filter) => (
+              <Button
+                key={filter.key}
+                size="sm"
+                variant={statusFilter === filter.key ? "secondary" : "ghost"}
+                onClick={() => setStatusFilter(filter.key)}
+              >
+                {filter.label}
+              </Button>
+            ))}
           </div>
         </div>
 
         <div className="flex items-center justify-between gap-3 sm:justify-end">
-          <span className="text-sm text-muted-foreground">Showing: {filtered.length}</span>
-          <button
-            onClick={() => setSortAsc((value) => !value)}
-            className="h-9 rounded-md border bg-background px-3 text-sm hover:bg-muted"
-            title="Toggle sort order"
-          >
+          <span className="text-xs text-muted-foreground">Showing: {filtered.length}</span>
+          <Button size="sm" variant="outline" onClick={() => setSortAsc((value) => !value)} title="Toggle sort order">
+            <ArrowUpDown className="mr-2 h-3.5 w-3.5" />
             Sort: {sortAsc ? "A -> Z" : "Z -> A"}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border bg-card/80 backdrop-blur-sm">
+      <div className="overflow-x-auto rounded-xl border border-border/65 bg-background/55 shadow-inner">
         <div className="max-h-[420px] overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 sticky top-0 z-10 backdrop-blur-sm">
+          <table className="w-full text-[14px] md:text-[15px]">
+            <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
               <tr>
-                <th className="px-4 py-2 text-left">Venue</th>
-                <th className="px-4 py-2 text-left">Current Quarter Status</th>
-                <th className="px-4 py-2 text-left">Notes</th>
-                <th className="px-4 py-2 text-left">Main Contact</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Venue</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Current Quarter Status</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Notes</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Main Contact</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((site, index) => (
-                <tr key={`${site.venueName}-${index}`} className="border-t hover:bg-muted/50">
-                  <td className="px-4 py-2 font-medium whitespace-nowrap">{site.venueName}</td>
-                  <td className="px-4 py-2">
+                <tr key={`${site.venueName}-${index}`} className="border-t border-border/35 hover:bg-muted/40">
+                  <td className="px-4 py-3 font-medium whitespace-nowrap">{site.venueName}</td>
+                  <td className="px-4 py-3">
                     <Badge status={site.currentQuarterStatus} />
                   </td>
-                  <td className="px-4 py-2 text-muted-foreground min-w-[320px]">{site.notes || "—"}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{site.primaryContact || "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground min-w-[320px] leading-6">{site.notes || "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{site.primaryContact || "—"}</td>
                 </tr>
               ))}
 

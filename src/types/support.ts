@@ -37,9 +37,16 @@ export type SyncZendeskResponse = {
   reason?: string;
   run_id?: string;
   brand?: string;
+  backfill_year?: boolean;
   tickets_fetched?: number;
   tickets_upserted?: number;
   cursor?: number;
+  start_cursor?: number | null;
+  target_backfill_cursor?: number | null;
+  max_pages?: number;
+  pages_processed?: number;
+  has_more?: boolean;
+  end_of_stream_reached?: boolean;
   error?: string;
 };
 
@@ -75,4 +82,61 @@ export type CopilotChatResponse = {
   reply: string;
   model?: string;
   error?: string;
+};
+
+export type SemanticSearchDocumentResult = {
+  chunk_id: string;
+  file_id: string;
+  brand: string;
+  storage_path: string;
+  file_name: string;
+  top_level_folder: string | null;
+  page_number: number | null;
+  similarity: number;
+  snippet: string;
+};
+
+export type SemanticSearchDocumentsResponse = {
+  ok?: boolean;
+  query?: string;
+  model?: string;
+  count?: number;
+  results?: SemanticSearchDocumentResult[];
+  error?: string;
+};
+
+export type WeeklyTicketReportRow = {
+  period_start_date: string;
+  period_end_date: string;
+  brand: string;
+  received_count: number;
+  solved_closed_count: number;
+  still_open_count: number;
+  resolution_rate: number;
+};
+
+export type TicketReceivedRollupRow = {
+  period_type: "month" | "quarter" | "year" | string;
+  period_start_date: string;
+  period_end_date: string;
+  brand: string;
+  received_count: number;
+  previous_period_start_date: string;
+  previous_period_end_date: string;
+  previous_received_count: number;
+  delta: number;
+  delta_pct: number | null;
+};
+
+export type TicketDataCoverageRow = {
+  earliest_created_at: string | null;
+  latest_created_at: string | null;
+  total_tickets: number;
+  tickets_with_created_at: number;
+  tickets_missing_created_at: number;
+  latest_sync_started_at: string | null;
+  latest_sync_finished_at: string | null;
+  latest_sync_status: string | null;
+  latest_sync_cursor: number | null;
+  latest_sync_error: string | null;
 };

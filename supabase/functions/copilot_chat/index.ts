@@ -33,15 +33,20 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
+function normalizeRole(value: unknown): ChatMessage["role"] {
+  if (value === "assistant" || value === "system" || value === "user") {
+    return value;
+  }
+  return "user";
+}
+
 function normalizeMessages(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) return [];
 
   return value
     .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-    .map((item) => {
-      const role = item.role === "user" || item.role === "assistant" || item.role === "system"
-        ? item.role
-        : "user";
+    .map((item): ChatMessage => {
+      const role = normalizeRole(item.role);
       const content = typeof item.content === "string" ? item.content.trim() : "";
       return { role, content };
     })
