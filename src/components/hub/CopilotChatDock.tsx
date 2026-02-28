@@ -26,6 +26,9 @@ const QUICK_PROMPTS = [
   "What should we prioritize in the queue today?",
   "Draft a short digest strategy for unresolved tickets.",
 ];
+const CHAT_DOCK_ANIMATION_MS = 280;
+
+type DockPanelState = "closed" | "opening" | "open" | "closing";
 
 function buildId(prefix: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -89,13 +92,17 @@ export function CopilotChatDock({
 }) {
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createSession(1)]);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => "");
-  const [open, setOpen] = useState(false);
+  const [panelState, setPanelState] = useState<DockPanelState>("closed");
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
   const [notificationBanner, setNotificationBanner] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const openRef = useRef(open);
+  const openRef = useRef(false);
   const activeSessionRef = useRef(activeSessionId);
+  const openTimerRef = useRef<number | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const isPanelOpen = panelState === "opening" || panelState === "open";
+  const showPanel = panelState !== "closed";
 
   useEffect(() => {
     if (!activeSessionId && sessions.length > 0) {
@@ -104,20 +111,71 @@ export function CopilotChatDock({
   }, [activeSessionId, sessions]);
 
   useEffect(() => {
-    openRef.current = open;
-  }, [open]);
+    openRef.current = isPanelOpen;
+  }, [isPanelOpen]);
 
   useEffect(() => {
     activeSessionRef.current = activeSessionId;
   }, [activeSessionId]);
 
+  useEffect(() => {
+    return () => {
+      if (openTimerRef.current !== null) {
+        window.clearTimeout(openTimerRef.current);
+      }
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
   const orderedSessions = useMemo(() => sortSessionsByUpdatedAt(sessions), [sessions]);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? orderedSessions[0] ?? null;
   const totalUnread = sessions.reduce((count, session) => count + session.unreadCount, 0);
 
+  function clearOpenTimer() {
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  }
+
+  function clearCloseTimer() {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }
+
+  function openPanel() {
+    clearCloseTimer();
+    clearOpenTimer();
+    if (panelState === "open" || panelState === "opening") {
+      return;
+    }
+    setPanelState("opening");
+    openTimerRef.current = window.setTimeout(() => {
+      setPanelState("open");
+      openTimerRef.current = null;
+    }, CHAT_DOCK_ANIMATION_MS);
+  }
+
+  function closePanel() {
+    clearOpenTimer();
+    clearCloseTimer();
+    if (panelState === "closed" || panelState === "closing") {
+      return;
+    }
+    setPanelState("closing");
+    closeTimerRef.current = window.setTimeout(() => {
+      setPanelState("closed");
+      closeTimerRef.current = null;
+    }, CHAT_DOCK_ANIMATION_MS);
+  }
+
   useEffect(() => {
     if (!activeSession) return;
-    if (!open) return;
+    if (!isPanelOpen) return;
 
     setSessions((prev) => {
       let changed = false;
@@ -129,24 +187,24 @@ export function CopilotChatDock({
       return changed ? next : prev;
     });
     setNotificationBanner(null);
-  }, [activeSession, open]);
+  }, [activeSession, isPanelOpen]);
 
   useEffect(() => {
     if (!activeSession) return;
-    if (!open) return;
+    if (!isPanelOpen) return;
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [activeSession, open, sending]);
+  }, [activeSession, isPanelOpen, sending]);
 
   function selectSession(sessionId: string) {
     setActiveSessionId(sessionId);
-    setOpen(true);
+    openPanel();
   }
 
   function startNewSession() {
     const next = createSession(sessions.length + 1);
     setSessions((prev) => [next, ...prev]);
     setActiveSessionId(next.id);
-    setOpen(true);
+    openPanel();
     setPrompt("");
   }
 
@@ -223,16 +281,16 @@ export function CopilotChatDock({
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
-      {!open && notificationBanner ? (
+      {!showPanel && notificationBanner ? (
         <div className="max-w-[250px] rounded-full border border-primary/40 bg-background/95 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur-sm">
           {notificationBanner}
         </div>
       ) : null}
 
-      {!open ? (
+      {!showPanel ? (
         <Button
-          onClick={() => setOpen(true)}
-          className="relative h-14 w-14 rounded-full border border-primary/30 bg-primary/90 p-0 text-primary-foreground shadow-xl transition hover:scale-[1.03] hover:bg-primary"
+          onClick={openPanel}
+          className="chat-dock-fab relative h-14 w-14 rounded-full border border-primary/35 bg-primary/90 p-0 text-primary-foreground shadow-[0_18px_40px_-20px_hsl(var(--primary)/0.95)] transition hover:scale-[1.03] hover:bg-primary"
           aria-label="Open support copilot chat"
         >
           <MessageSquare className="h-6 w-6" />
@@ -243,7 +301,14 @@ export function CopilotChatDock({
           ) : null}
         </Button>
       ) : (
-        <section className="h-[min(74vh,680px)] w-[min(430px,calc(100vw-1rem))] rounded-2xl border bg-card/95 shadow-2xl backdrop-blur-md">
+        <section
+          className={[
+            "chat-dock-shell relative h-[min(74vh,680px)] w-[min(430px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-primary/20 bg-card/95 shadow-[0_28px_80px_-38px_rgba(0,0,0,0.98)] backdrop-blur-md",
+            panelState === "opening" ? "chat-dock-enter" : "",
+            panelState === "closing" ? "chat-dock-exit pointer-events-none" : "",
+          ].join(" ")}
+        >
+          <div className="pointer-events-none absolute inset-0 rounded-2xl border border-primary/12" />
           <header className="border-b bg-gradient-to-r from-primary/15 via-card to-card px-4 py-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -259,7 +324,7 @@ export function CopilotChatDock({
                 <Button size="icon" variant="ghost" onClick={startNewSession} aria-label="Start new chat">
                   <Plus className="h-4 w-4" />
                 </Button>
-                <Button size="icon" variant="ghost" onClick={() => setOpen(false)} aria-label="Minimize chat">
+                <Button size="icon" variant="ghost" onClick={closePanel} aria-label="Minimize chat">
                   <Minimize2 className="h-4 w-4" />
                 </Button>
               </div>
