@@ -7,6 +7,9 @@ type BrandFilter = "all" | "omni_one" | "omni_arena";
 type SyncOptions = {
   brand: BrandFilter;
   startTime?: number;
+  backfillYear: boolean;
+  backfillDays?: number;
+  maxPages?: number;
 };
 
 type ZendeskTicket = {
@@ -77,6 +80,31 @@ function parseInteger(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function parseBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(normalized)) return true;
+    if (["false", "0", "no", "n"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function parseOptionalPositiveInteger(value: unknown): number | undefined {
+  const parsed = parseInteger(value);
+  if (parsed === null || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function normalizeString(value: unknown): string | null {
@@ -227,26 +255,32 @@ async function getSyncOptions(req: Request): Promise<SyncOptions> {
 
   if (req.method === "GET") {
     const brand = (url.searchParams.get("brand") ?? "all") as BrandFilter;
-    const startTimeRaw = url.searchParams.get("start_time");
-    const startTime = startTimeRaw ? Number.parseInt(startTimeRaw, 10) : undefined;
+    const startTime = parseOptionalPositiveInteger(url.searchParams.get("start_time"));
+    const backfillYear = parseBoolean(url.searchParams.get("backfill_year")) === true;
+    const backfillDays = parseOptionalPositiveInteger(url.searchParams.get("backfill_days"));
+    const maxPages = parseOptionalPositiveInteger(url.searchParams.get("max_pages"));
     return {
       brand: brand === "omni_one" || brand === "omni_arena" ? brand : "all",
-      startTime: Number.isFinite(startTime) ? startTime : undefined,
+      startTime,
+      backfillYear,
+      backfillDays,
+      maxPages,
     };
   }
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const requestedBrand = typeof body.brand === "string" ? body.brand : "all";
-  const requestedStartTime =
-    typeof body.start_time === "number"
-      ? body.start_time
-      : typeof body.start_time === "string"
-        ? Number.parseInt(body.start_time, 10)
-        : undefined;
+  const requestedStartTime = parseOptionalPositiveInteger(body.start_time);
+  const backfillYear = parseBoolean(body.backfill_year) === true;
+  const backfillDays = parseOptionalPositiveInteger(body.backfill_days);
+  const maxPages = parseOptionalPositiveInteger(body.max_pages);
 
   return {
     brand: requestedBrand === "omni_one" || requestedBrand === "omni_arena" ? requestedBrand : "all",
-    startTime: Number.isFinite(requestedStartTime) ? requestedStartTime : undefined,
+    startTime: requestedStartTime,
+    backfillYear,
+    backfillDays,
+    maxPages,
   };
 }
 
@@ -293,27 +327,56 @@ serve(async (req) => {
   let runId: string | null = null;
   let fetchedCount = 0;
   let upsertedCount = 0;
-  const staleRunThresholdMs = 20 * 60 * 1000;
+  const staleRunThresholdMs = (options.backfillYear ? 120 : 20) * 60 * 1000;
+  let lastCursorForError: number | null = null;
+  let initialCursor: number | null = null;
+  let targetBackfillCursor: number | null = null;
 
   try {
+    const nowEpochSeconds = Math.floor(Date.now() / 1000);
+    const defaultCursor = nowEpochSeconds - 60 * 60;
+    const minimumBackfillDays = 365;
+
     let cursor = options.startTime;
 
-    if (!cursor) {
-      const { data: lastRun, error: cursorError } = await supabaseAdmin
-        .from("zendesk_sync_runs")
-        .select("cursor")
-        .eq("status", "success")
-        .not("cursor", "is", null)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    const { data: lastRun, error: cursorError } = await supabaseAdmin
+      .from("zendesk_sync_runs")
+      .select("cursor")
+      .in("status", ["success", "error"])
+      .not("cursor", "is", null)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      if (cursorError) {
-        throw new Error(`Failed to fetch previous Zendesk cursor: ${cursorError.message}`);
-      }
-
-      cursor = lastRun?.cursor ?? Math.floor(Date.now() / 1000) - 60 * 60;
+    if (cursorError) {
+      throw new Error(`Failed to fetch previous Zendesk cursor: ${cursorError.message}`);
     }
+
+    const latestKnownCursor = typeof lastRun?.cursor === "number" ? lastRun.cursor : null;
+
+    if (!cursor && options.backfillYear) {
+      const backfillDays = Math.max(options.backfillDays ?? minimumBackfillDays, minimumBackfillDays);
+      targetBackfillCursor = nowEpochSeconds - backfillDays * 24 * 60 * 60;
+      const nearRealtimeThreshold = nowEpochSeconds - 5 * 60;
+
+      // Resume from latest cursor when a prior backfill run likely stopped mid-way.
+      if (
+        latestKnownCursor !== null &&
+        latestKnownCursor >= targetBackfillCursor &&
+        latestKnownCursor < nearRealtimeThreshold
+      ) {
+        cursor = latestKnownCursor;
+      } else {
+        cursor = targetBackfillCursor;
+      }
+    }
+
+    if (!cursor) {
+      cursor = latestKnownCursor ?? defaultCursor;
+    }
+    initialCursor = cursor;
+
+    lastCursorForError = cursor;
 
     const { data: runningRun, error: runningRunError } = await supabaseAdmin
       .from("zendesk_sync_runs")
@@ -381,11 +444,13 @@ serve(async (req) => {
     runId = runData.id as string;
 
     const authHeader = `Basic ${btoa(`${ZENDESK_EMAIL}/token:${ZENDESK_API_TOKEN}`)}`;
+    const enrichRequesterDetails = !options.backfillYear;
     const requesterCache = new Map<number, Promise<ZendeskUser | null>>();
-    let nextPageUrl = `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/incremental/tickets.json?start_time=${cursor}`;
+    let nextPageUrl: string | null =
+      `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/incremental/tickets.json?start_time=${cursor}`;
     let lastCursor = cursor;
 
-    const maxPages = 20;
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? (options.backfillYear ? 120 : 20), 500));
     let page = 0;
 
     while (nextPageUrl && page < maxPages) {
@@ -409,7 +474,7 @@ serve(async (req) => {
           const requesterId = parseInteger(ticket.requester_id);
 
           let requesterUser: ZendeskUser | null = null;
-          if (requesterId !== null && (!embeddedRequesterName || !embeddedRequesterEmail)) {
+          if (enrichRequesterDetails && requesterId !== null && (!embeddedRequesterName || !embeddedRequesterEmail)) {
             let userPromise = requesterCache.get(requesterId);
             if (!userPromise) {
               userPromise = fetchZendeskUser(requesterId, authHeader);
@@ -436,7 +501,7 @@ serve(async (req) => {
             requester_email: requesterEmail,
             requester_name: requesterName,
             assignee_email: ticket.assignee?.email,
-            zendesk_created_at: ticket.created_at,
+            zendesk_created_at: ticket.created_at ?? ticket.updated_at,
             zendesk_updated_at: ticket.updated_at,
             ticket_url: buildTicketUrl(ticket.url, ticket.id),
             raw_payload: ticket,
@@ -456,10 +521,28 @@ serve(async (req) => {
       }
 
       lastCursor = payload.end_time ?? lastCursor;
+      lastCursorForError = lastCursor;
       nextPageUrl = payload.end_of_stream ? null : payload.next_page ?? null;
       page += 1;
+
+      // Persist progress periodically so long backfills can safely resume.
+      if (runId && page % 5 === 0) {
+        const { error: progressError } = await supabaseAdmin
+          .from("zendesk_sync_runs")
+          .update({
+            cursor: lastCursor,
+            tickets_fetched: fetchedCount,
+            tickets_upserted: upsertedCount,
+          })
+          .eq("id", runId);
+
+        if (progressError) {
+          console.warn("Unable to checkpoint sync progress", progressError.message);
+        }
+      }
     }
 
+    const hasMore = Boolean(nextPageUrl);
     const { error: runUpdateError } = await supabaseAdmin
       .from("zendesk_sync_runs")
       .update({
@@ -468,6 +551,9 @@ serve(async (req) => {
         tickets_fetched: fetchedCount,
         tickets_upserted: upsertedCount,
         cursor: lastCursor,
+        error_message: hasMore
+          ? "Reached max_pages before end_of_stream. Rerun sync_zendesk to continue historical backfill."
+          : null,
       })
       .eq("id", runId);
 
@@ -479,9 +565,16 @@ serve(async (req) => {
       ok: true,
       run_id: runId,
       brand: options.brand,
+      backfill_year: options.backfillYear,
       tickets_fetched: fetchedCount,
       tickets_upserted: upsertedCount,
       cursor: lastCursor,
+      max_pages: maxPages,
+      pages_processed: page,
+      has_more: hasMore,
+      end_of_stream_reached: !hasMore,
+      start_cursor: initialCursor,
+      target_backfill_cursor: targetBackfillCursor,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Zendesk sync error";
@@ -494,6 +587,7 @@ serve(async (req) => {
           finished_at: new Date().toISOString(),
           tickets_fetched: fetchedCount,
           tickets_upserted: upsertedCount,
+          cursor: lastCursorForError,
           error_message: message,
         })
         .eq("id", runId);

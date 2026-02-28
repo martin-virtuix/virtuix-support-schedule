@@ -30,8 +30,8 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
 
   if (!bundle) {
     return (
-      <div className="glass-card rounded-xl overflow-hidden animate-pulse">
-        <div className="p-4 space-y-3">
+      <div className="surface-panel overflow-hidden animate-pulse">
+        <div className="p-5 space-y-3">
           {[...Array(7)].map((_, i) => (
             <div key={i} className="h-10 bg-muted rounded" />
           ))}
@@ -41,14 +41,14 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
   }
 
   return (
-    <div className="glass-card rounded-xl border bg-card/80 backdrop-blur-sm">
-      <Table className="w-full table-fixed text-[0.95rem]">
+    <div className="surface-panel overflow-hidden">
+      <Table className="w-full table-fixed text-[15px] md:text-[16px]">
         <TableHeader>
-          <TableRow className="border-border/50 hover:bg-transparent">
-            <TableHead className="w-[96px] text-xs uppercase tracking-wider text-muted-foreground font-semibold">Day</TableHead>
-            <TableHead className="w-[220px] whitespace-nowrap text-xs uppercase tracking-wider text-muted-foreground font-semibold">Business Hours</TableHead>
-            <TableHead className="w-[280px] text-xs uppercase tracking-wider text-muted-foreground font-semibold">On Duty</TableHead>
-            <TableHead className="min-w-[220px] text-xs uppercase tracking-wider text-muted-foreground font-semibold">Notes</TableHead>
+          <TableRow className="border-border/55 bg-background/55 hover:bg-transparent">
+            <TableHead className="w-[102px] py-3 text-[11px] uppercase tracking-[0.13em] text-muted-foreground font-semibold">Day</TableHead>
+            <TableHead className="w-[230px] whitespace-nowrap py-3 text-[11px] uppercase tracking-[0.13em] text-muted-foreground font-semibold">Business Hours</TableHead>
+            <TableHead className="w-[300px] py-3 text-[11px] uppercase tracking-[0.13em] text-muted-foreground font-semibold">On Duty</TableHead>
+            <TableHead className="min-w-[220px] py-3 text-[11px] uppercase tracking-[0.13em] text-muted-foreground font-semibold">Notes</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -63,14 +63,14 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
               <TableRow
                 key={key}
                 className={cn(
-                  "border-border/30 transition-colors",
-                  isToday && "bg-primary/5"
+                  "border-border/35 transition-colors",
+                  isToday ? "bg-primary/8" : "odd:bg-background/35"
                 )}
               >
-                <TableCell className={cn("font-medium", isToday && "text-primary")}>
+                <TableCell className={cn("py-4 font-medium", isToday && "text-primary")}>
                   <span
                     className={cn(
-                      "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide",
+                      "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.1em]",
                       isToday ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/50 border-border text-foreground",
                     )}
                     title={dayLabel[key]}
@@ -78,11 +78,11 @@ export function ScheduleTable({ bundle, highlightToday }: ScheduleTableProps) {
                     {dayPillLabel[key] || dayLabel[key].slice(0, 3).toUpperCase()}
                   </span>
                 </TableCell>
-                <TableCell className="whitespace-nowrap text-foreground/95">
+                <TableCell className="py-4 whitespace-nowrap text-foreground/95">
                   {formatHours(key, bundle.businessHours)}
                 </TableCell>
-                <TableCell className="text-foreground/95">{people}</TableCell>
-                <TableCell className="text-muted-foreground">{note}</TableCell>
+                <TableCell className="py-4 text-foreground/95">{people}</TableCell>
+                <TableCell className="py-4 leading-6 text-muted-foreground">{note}</TableCell>
               </TableRow>
             );
           })}

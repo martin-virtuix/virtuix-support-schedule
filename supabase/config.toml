@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.copilot_chat]
 verify_jwt = false
+
+[functions.semantic_search_documents]
+verify_jwt = false

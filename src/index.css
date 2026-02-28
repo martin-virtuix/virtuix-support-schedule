@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -41,6 +43,8 @@
     --ring: 86 55% 50%;
 
     --radius: 0.75rem;
+    --font-sans: "Manrope", "Segoe UI", sans-serif;
+    --font-display: "Sora", "Manrope", sans-serif;
 
     --sidebar-background: 0 0% 6%;
     --sidebar-foreground: 0 0% 98%;
@@ -86,6 +90,8 @@
     --border: 0 0% 18%;
     --input: 0 0% 14%;
     --ring: 86 55% 50%;
+    --font-sans: "Manrope", "Segoe UI", sans-serif;
+    --font-display: "Sora", "Manrope", sans-serif;
 
     --sidebar-background: 0 0% 6%;
     --sidebar-foreground: 0 0% 98%;
@@ -105,15 +111,74 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    background-image:
+      radial-gradient(circle at 15% -10%, hsl(var(--primary) / 0.12), transparent 30%),
+      radial-gradient(circle at 90% 5%, hsl(var(--primary) / 0.08), transparent 35%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+  }
+}
+
+@keyframes reveal-up {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @layer utilities {
   .glass-card {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50 shadow-2xl;
+    @apply bg-card/80 backdrop-blur-xl border border-border/55 shadow-[0_20px_80px_-40px_rgba(0,0,0,0.9)];
   }
   
   .text-gradient {
     @apply bg-gradient-to-r from-primary to-lime-400 bg-clip-text text-transparent;
+  }
+
+  .surface-panel {
+    @apply rounded-2xl border border-border/60 bg-card/60 backdrop-blur-sm shadow-[0_20px_60px_-45px_rgba(0,0,0,0.85)];
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+  }
+
+  .reveal-up {
+    animation: reveal-up 0.55s cubic-bezier(0.2, 0.65, 0.2, 1) both;
+  }
+
+  .reveal-delay-1 {
+    animation-delay: 0.08s;
+  }
+
+  .reveal-delay-2 {
+    animation-delay: 0.16s;
+  }
+
+  .ambient-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.2) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.2) 1px, transparent 1px);
+    background-size: 36px 36px;
+  }
+
+  .report-date-input {
+    color-scheme: dark;
+    accent-color: hsl(var(--primary));
+    position: relative;
+  }
+
+  .report-date-input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0;
+    position: absolute;
+    right: 0;
+    width: 2.5rem;
+    height: 100%;
   }
 }

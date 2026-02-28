@@ -249,7 +249,8 @@ serve(async (req) => {
     runId = runData.id as string;
 
     const authHeader = `Basic ${btoa(`${ZENDESK_EMAIL}/token:${ZENDESK_API_TOKEN}`)}`;
-    let nextPageUrl = `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/incremental/tickets.json?start_time=${cursor}`;
+    let nextPageUrl: string | null =
+      `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/incremental/tickets.json?start_time=${cursor}`;
     let lastCursor = cursor;
 
     const maxPages = 20;
