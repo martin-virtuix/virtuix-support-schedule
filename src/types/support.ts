@@ -77,11 +77,41 @@ export type SendToSlackResponse = {
   error?: string;
 };
 
+export type CopilotCitation = {
+  source_type: "document" | "ticket";
+  title: string;
+  reference: string;
+  url?: string | null;
+  excerpt?: string | null;
+  similarity?: number | null;
+  ticket_id?: number | null;
+  brand?: string | null;
+  status?: string | null;
+};
+
 export type CopilotChatResponse = {
   ok: boolean;
   reply: string;
+  citations?: CopilotCitation[];
   model?: string;
   error?: string;
+};
+
+export type HubAnalyticsTrackResponse = {
+  ok: boolean;
+  error?: string;
+};
+
+export type HubAnalyticsBaselineRow = {
+  period_start_date: string;
+  period_end_date: string;
+  total_events: number;
+  unique_users: number;
+  copilot_queries: number;
+  citation_clicks: number;
+  weekly_reports_refreshed: number;
+  rollup_reports_refreshed: number;
+  sql_reports_generated: number;
 };
 
 export type SemanticSearchDocumentResult = {

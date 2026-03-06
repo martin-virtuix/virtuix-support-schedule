@@ -6,15 +6,19 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
 import { CopilotChatDock, type CopilotChatInputMessage } from "@/components/hub/CopilotChatDock";
 import { getArenaSites, type ArenaSite } from "@/lib/scheduleData";
 import { useToast } from "@/hooks/use-toast";
 import type {
+  CopilotCitation,
   CopilotChatResponse,
   CreateDigestResponse,
   Digest,
+  HubAnalyticsBaselineRow,
+  HubAnalyticsTrackResponse,
   SemanticSearchDocumentResult,
   SemanticSearchDocumentsResponse,
   SendToSlackResponse,
@@ -94,6 +98,41 @@ type SupportDocument = {
 };
 
 const ACTIVE_TICKET_STATUSES = new Set(["new", "open", "pending"]);
+
+type ParsedImportedVenueRow = {
+  venue: string;
+  totalPlays: number;
+  uniquePlayers: number;
+};
+
+type ImportedVenueSummary = {
+  venue: string;
+  totalPlays: number;
+  uniquePlayers: number;
+  playsPerPlayer: number;
+};
+
+type ImportedMetricSummary = {
+  key: "total_plays" | "total_unique_players" | "total_venues" | "avg_plays_per_venue" | "avg_unique_per_venue" | "avg_plays_per_player";
+  label: string;
+  value: number;
+  format: "integer" | "decimal";
+  subtitle: string;
+};
+
+type ImportedSqlReport = {
+  totalParsedRows: number;
+  skippedRows: number;
+  totalPlays: number;
+  totalUniquePlayers: number;
+  venueCount: number;
+  averagePlaysPerVenue: number;
+  averageUniquePlayersPerVenue: number;
+  averagePlaysPerPlayer: number;
+  venues: ImportedVenueSummary[];
+  topVenues: ImportedVenueSummary[];
+  metricSummaries: ImportedMetricSummary[];
+};
 
 type ClientAuthDebug = {
   token_prefix: string | null;
@@ -251,6 +290,294 @@ function getRollupCardToneClass(period: string): string {
     default:
       return "from-primary/10 to-primary/8 hover:from-primary/18 hover:to-primary/12";
   }
+}
+
+function getSqlImportMetricToneClass(key: ImportedMetricSummary["key"]): string {
+  switch (key) {
+    case "total_plays":
+      return "from-primary/14 to-primary/9 hover:from-primary/22 hover:to-primary/14";
+    case "total_unique_players":
+      return "from-primary/12 to-emerald-500/10 hover:from-primary/20 hover:to-emerald-500/16";
+    case "total_venues":
+      return "from-primary/12 to-lime-500/10 hover:from-primary/20 hover:to-lime-500/16";
+    case "avg_plays_per_venue":
+      return "from-primary/11 to-green-500/9 hover:from-primary/19 hover:to-green-500/14";
+    case "avg_unique_per_venue":
+      return "from-primary/10 to-teal-500/9 hover:from-primary/18 hover:to-teal-500/14";
+    case "avg_plays_per_player":
+      return "from-primary/11 to-emerald-400/10 hover:from-primary/19 hover:to-emerald-400/15";
+    default:
+      return "from-primary/10 to-primary/8 hover:from-primary/18 hover:to-primary/12";
+  }
+}
+
+function splitDelimitedLine(line: string, delimiter: string): string[] {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = index + 1 < line.length ? line[index + 1] : "";
+
+    if (char === "\"") {
+      if (inQuotes && nextChar === "\"") {
+        current += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && char === delimiter) {
+      values.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function detectDelimiter(headerLine: string): string {
+  const tabCount = (headerLine.match(/\t/g) || []).length;
+  const commaCount = (headerLine.match(/,/g) || []).length;
+  if (tabCount > 0 && tabCount >= commaCount) return "\t";
+  return ",";
+}
+
+function normalizeHeaderKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function findHeaderIndex(headers: string[], candidates: string[]): number {
+  const normalizedCandidates = new Set(candidates.map((candidate) => normalizeHeaderKey(candidate)));
+  return headers.findIndex((header) => normalizedCandidates.has(normalizeHeaderKey(header)));
+}
+
+function parseImportNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatMetricValue(metric: ImportedMetricSummary): string {
+  if (metric.format === "integer") {
+    return Math.round(metric.value).toLocaleString();
+  }
+  return metric.value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function parseImportedVenueRows(rawInput: string): {
+  rows: ParsedImportedVenueRow[];
+  rowCount: number;
+  skippedRows: number;
+} {
+  const normalizedInput = rawInput
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+
+  if (!normalizedInput) {
+    throw new Error("Paste SQL export rows (CSV/TSV) first.");
+  }
+
+  const lines = normalizedInput
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length < 2) {
+    throw new Error("Need at least a header row and one data row.");
+  }
+
+  const delimiter = detectDelimiter(lines[0]);
+  const headers = splitDelimitedLine(lines[0], delimiter);
+
+  const venueIndex = findHeaderIndex(headers, [
+    "venue",
+    "name",
+    "shop_name",
+    "shop",
+    "location",
+    "site",
+  ]);
+  const totalPlaysIndex = findHeaderIndex(headers, [
+    "total_plays",
+    "totalplays",
+    "total plays",
+    "plays",
+    "play_count",
+    "playcount",
+    "sessions",
+    "total_sessions",
+  ]);
+  const uniquePlayersIndex = findHeaderIndex(headers, [
+    "unique_players",
+    "uniqueplayers",
+    "unique players",
+    "players",
+    "distinct_players",
+    "distinctplayers",
+  ]);
+
+  if (venueIndex < 0 || totalPlaysIndex < 0 || uniquePlayersIndex < 0) {
+    throw new Error("Could not find required columns. Required headers: Venue, Total_Plays, Unique_Players.");
+  }
+
+  const rows: ParsedImportedVenueRow[] = [];
+  let skippedRows = 0;
+
+  for (const line of lines.slice(1)) {
+    const values = splitDelimitedLine(line, delimiter);
+    if (values.length === 0) continue;
+    const venue = (values[venueIndex] || "").trim();
+    const totalPlays = parseImportNumber(values[totalPlaysIndex] || "");
+    const uniquePlayers = parseImportNumber(values[uniquePlayersIndex] || "");
+
+    if (!venue || totalPlays === null || uniquePlayers === null) {
+      skippedRows += 1;
+      continue;
+    }
+
+    rows.push({
+      venue,
+      totalPlays,
+      uniquePlayers,
+    });
+  }
+
+  if (rows.length === 0) {
+    throw new Error("No valid rows found. Confirm headers are Venue, Total_Plays, Unique_Players.");
+  }
+
+  return {
+    rows,
+    rowCount: rows.length,
+    skippedRows,
+  };
+}
+
+function buildImportedSqlReport(
+  rows: ParsedImportedVenueRow[],
+  skippedRows: number,
+): ImportedSqlReport {
+  const venues = rows
+    .map((row) => {
+      const playsPerPlayer = row.uniquePlayers > 0 ? row.totalPlays / row.uniquePlayers : 0;
+      return {
+        venue: row.venue,
+        totalPlays: row.totalPlays,
+        uniquePlayers: row.uniquePlayers,
+        playsPerPlayer,
+      };
+    })
+    .sort((a, b) => b.totalPlays - a.totalPlays);
+
+  const totalPlays = venues.reduce((sum, row) => sum + row.totalPlays, 0);
+  const totalUniquePlayers = venues.reduce((sum, row) => sum + row.uniquePlayers, 0);
+  const venueCount = venues.length;
+  const averagePlaysPerVenue = venueCount > 0 ? totalPlays / venueCount : 0;
+  const averageUniquePlayersPerVenue = venueCount > 0 ? totalUniquePlayers / venueCount : 0;
+  const averagePlaysPerPlayer = totalUniquePlayers > 0 ? totalPlays / totalUniquePlayers : 0;
+
+  const metricSummaries: ImportedMetricSummary[] = [
+    {
+      key: "total_plays",
+      label: "Total Plays",
+      value: totalPlays,
+      format: "integer",
+      subtitle: "All sessions in the pasted dataset",
+    },
+    {
+      key: "total_unique_players",
+      label: "Unique Players",
+      value: totalUniquePlayers,
+      format: "integer",
+      subtitle: "Distinct players aggregated by venue",
+    },
+    {
+      key: "total_venues",
+      label: "Venues",
+      value: venueCount,
+      format: "integer",
+      subtitle: "Total locations in this report",
+    },
+    {
+      key: "avg_plays_per_venue",
+      label: "Avg Plays / Venue",
+      value: averagePlaysPerVenue,
+      format: "decimal",
+      subtitle: "Average session volume per location",
+    },
+    {
+      key: "avg_unique_per_venue",
+      label: "Avg Unique / Venue",
+      value: averageUniquePlayersPerVenue,
+      format: "decimal",
+      subtitle: "Average unique players per location",
+    },
+    {
+      key: "avg_plays_per_player",
+      label: "Plays / Player",
+      value: averagePlaysPerPlayer,
+      format: "decimal",
+      subtitle: "Average sessions per unique player",
+    },
+  ];
+
+  return {
+    totalParsedRows: rows.length,
+    skippedRows,
+    totalPlays,
+    totalUniquePlayers,
+    venueCount,
+    averagePlaysPerVenue,
+    averageUniquePlayersPerVenue,
+    averagePlaysPerPlayer,
+    venues,
+    topVenues: venues.slice(0, 10),
+    metricSummaries,
+  };
+}
+
+function formatDecimalValue(value: number, digits = 2): string {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function buildImportedSqlSummary(report: ImportedSqlReport): string {
+  const lines: string[] = [
+    "Imported Venue Performance Report",
+    `${report.totalParsedRows} venues parsed${report.skippedRows > 0 ? `, ${report.skippedRows} skipped row(s)` : ""}.`,
+    `Total Plays: ${Math.round(report.totalPlays).toLocaleString()}`,
+    `Unique Players: ${Math.round(report.totalUniquePlayers).toLocaleString()}`,
+    `Venue Count: ${Math.round(report.venueCount).toLocaleString()}`,
+    `Avg Plays / Venue: ${formatDecimalValue(report.averagePlaysPerVenue)}`,
+    `Avg Unique / Venue: ${formatDecimalValue(report.averageUniquePlayersPerVenue)}`,
+    `Avg Plays / Player: ${formatDecimalValue(report.averagePlaysPerPlayer)}`,
+  ];
+
+  lines.push("");
+  lines.push("Top Venues by Total Plays:");
+  report.topVenues.forEach((venue, index) => {
+    lines.push(
+      `${index + 1}. ${venue.venue} - ${Math.round(venue.totalPlays).toLocaleString()} plays, ${Math.round(venue.uniquePlayers).toLocaleString()} unique (${formatDecimalValue(venue.playsPerPlayer)} plays/player)`,
+    );
+  });
+
+  return lines.join("\n");
 }
 
 function formatFileSize(sizeBytes: number | null): string {
@@ -1379,6 +1706,9 @@ function ReportsPane({
   receivedRollupRows,
   receivedRollupLoading,
   receivedRollupError,
+  analyticsBaseline,
+  analyticsBaselineLoading,
+  analyticsBaselineError,
   coverage,
   coverageLoading,
   coverageError,
@@ -1392,12 +1722,16 @@ function ReportsPane({
   onRefreshReceivedRollup,
   onCopySummary,
   onCopyReceivedRollupSummary,
+  onTrackEvent,
 }: {
   rows: WeeklyTicketReportRow[];
   previousRows: WeeklyTicketReportRow[];
   receivedRollupRows: TicketReceivedRollupRow[];
   receivedRollupLoading: boolean;
   receivedRollupError: string | null;
+  analyticsBaseline: HubAnalyticsBaselineRow | null;
+  analyticsBaselineLoading: boolean;
+  analyticsBaselineError: string | null;
   coverage: TicketDataCoverageRow | null;
   coverageLoading: boolean;
   coverageError: string | null;
@@ -1411,6 +1745,7 @@ function ReportsPane({
   onRefreshReceivedRollup: () => Promise<void>;
   onCopySummary: () => Promise<void>;
   onCopyReceivedRollupSummary: () => Promise<void>;
+  onTrackEvent?: (eventName: string, metadata?: Record<string, unknown>) => void;
 }) {
   const labels: Record<string, string> = {
     total: "Total",
@@ -1455,6 +1790,9 @@ function ReportsPane({
   }, [receivedRollupMap]);
   const [activeWeeklyBrand, setActiveWeeklyBrand] = useState<string>("total");
   const [activeRollupPeriod, setActiveRollupPeriod] = useState<string>("month");
+  const [sqlImportInput, setSqlImportInput] = useState("");
+  const [sqlImportReport, setSqlImportReport] = useState<ImportedSqlReport | null>(null);
+  const [sqlImportError, setSqlImportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (sortedRows.length === 0) return;
@@ -1469,6 +1807,42 @@ function ReportsPane({
       setActiveRollupPeriod(receivedRollupTotals[0].period_type);
     }
   }, [activeRollupPeriod, receivedRollupTotals]);
+
+  function handleGenerateImportedSqlReport() {
+    setSqlImportError(null);
+
+    try {
+      const parsed = parseImportedVenueRows(sqlImportInput);
+      const report = buildImportedSqlReport(parsed.rows, parsed.skippedRows);
+      setSqlImportReport(report);
+      onTrackEvent?.("sql_import_report_generated", {
+        parsed_rows: parsed.rowCount,
+        skipped_rows: parsed.skippedRows,
+        venue_count: report.venueCount,
+        total_plays: report.totalPlays,
+        unique_players: report.totalUniquePlayers,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to parse imported SQL rows.";
+      setSqlImportReport(null);
+      setSqlImportError(message);
+      onTrackEvent?.("sql_import_report_failed", { message });
+    }
+  }
+
+  async function handleCopyImportedSqlSummary() {
+    if (!sqlImportReport) return;
+
+    try {
+      await navigator.clipboard.writeText(buildImportedSqlSummary(sqlImportReport));
+      onTrackEvent?.("sql_import_summary_copied", {
+        venue_count: sqlImportReport.venueCount,
+        total_plays: sqlImportReport.totalPlays,
+      });
+    } catch {
+      // no-op, caller UI already communicates clipboard failures elsewhere
+    }
+  }
 
   const coverageStartDate = coverage?.earliest_created_at?.slice(0, 10) || null;
   const coverageEndDate = coverage?.latest_created_at?.slice(0, 10) || null;
@@ -1506,6 +1880,29 @@ function ReportsPane({
                   {coverage.latest_sync_finished_at ? ` at ${formatDateTime(coverage.latest_sync_finished_at)}` : ""}
                 </p>
               ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-xl border border-border/65 bg-background/45 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Hub Analytics (Last 14 Days)</p>
+          {analyticsBaselineLoading ? <p className="mt-2 text-[13px] text-muted-foreground">Loading baseline metrics...</p> : null}
+          {!analyticsBaselineLoading && analyticsBaselineError ? (
+            <p className="mt-2 text-[13px] text-destructive">{analyticsBaselineError}</p>
+          ) : null}
+          {!analyticsBaselineLoading && !analyticsBaselineError && analyticsBaseline ? (
+            <div className="mt-2 space-y-1.5 text-[13px] leading-5">
+              <p>
+                Window: {formatDateShort(analyticsBaseline.period_start_date)} - {formatDateShort(analyticsBaseline.period_end_date)}
+              </p>
+              <p className="text-muted-foreground">{analyticsBaseline.total_events} events from {analyticsBaseline.unique_users} active users.</p>
+              <p className="text-muted-foreground">
+                Copilot queries: {analyticsBaseline.copilot_queries} | Citation clicks: {analyticsBaseline.citation_clicks}
+              </p>
+              <p className="text-muted-foreground">
+                Weekly refreshes: {analyticsBaseline.weekly_reports_refreshed} | M/Q/Y refreshes: {analyticsBaseline.rollup_reports_refreshed}
+              </p>
+              <p className="text-muted-foreground">SQL reports generated: {analyticsBaseline.sql_reports_generated}</p>
             </div>
           ) : null}
         </div>
@@ -1821,6 +2218,100 @@ function ReportsPane({
                 </>
               )}
             </div>
+
+            <div className="rounded-xl border border-border/65 bg-background/50 p-4 space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight">SQL Import Report Builder</h3>
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  Paste HeidiSQL rows (CSV/TSV) with `Venue`, `Total_Plays`, and `Unique_Players` to generate a management-ready summary.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="sql-import-input" className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  SQL Export Rows
+                </label>
+                <Textarea
+                  id="sql-import-input"
+                  value={sqlImportInput}
+                  onChange={(event) => setSqlImportInput(event.target.value)}
+                  placeholder={"Venue\tTotal_Plays\tUnique_Players\nJake's Unlimited - Mesa\t1975\t294"}
+                  className="min-h-[160px] resize-y bg-background/55"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={handleGenerateImportedSqlReport}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Generate Imported Report
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleCopyImportedSqlSummary()}
+                  disabled={!sqlImportReport}
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy Imported Summary
+                </Button>
+              </div>
+
+              {sqlImportError ? <p className="text-sm text-destructive">{sqlImportError}</p> : null}
+
+              {sqlImportReport ? (
+                <>
+                  <p className="text-[12px] text-muted-foreground">
+                    Parsed {sqlImportReport.totalParsedRows} venue rows.
+                    {sqlImportReport.skippedRows > 0 ? ` ${sqlImportReport.skippedRows} rows were skipped due to missing/invalid values.` : ""}
+                  </p>
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {sqlImportReport.metricSummaries.map((metric) => (
+                      <div
+                        key={`sql-metric-${metric.key}`}
+                        className={[
+                          "rounded-xl border p-4 text-left transition-all duration-200",
+                          "bg-gradient-to-br",
+                          getSqlImportMetricToneClass(metric.key),
+                          "border-border/65 hover:-translate-y-0.5 hover:border-primary/70 hover:shadow-[0_16px_34px_-24px_hsl(var(--primary)/0.92)]",
+                        ].join(" ")}
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                          {metric.label}
+                        </p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight">{formatMetricValue(metric)}</p>
+                        <p className="mt-1 text-[12px] text-muted-foreground">{metric.subtitle}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-border/65 bg-background/55 shadow-inner">
+                    <table className="w-full text-[14px] md:text-[15px]">
+                      <thead className="bg-muted/55">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">#</th>
+                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Venue</th>
+                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Total Plays</th>
+                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Unique Players</th>
+                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Plays / Player</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sqlImportReport.topVenues.map((venue, index) => (
+                          <tr key={`sql-venue-${index}-${venue.venue}`} className="border-t border-border/35">
+                            <td className="px-4 py-3">{index + 1}</td>
+                            <td className="px-4 py-3 font-medium">{venue.venue}</td>
+                            <td className="px-4 py-3">{Math.round(venue.totalPlays).toLocaleString()}</td>
+                            <td className="px-4 py-3">{Math.round(venue.uniquePlayers).toLocaleString()}</td>
+                            <td className="px-4 py-3">{formatDecimalValue(venue.playsPerPlayer)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+            </div>
           </>
         )}
       </div>
@@ -1901,6 +2392,9 @@ export default function Hub() {
   const [ticketDataCoverage, setTicketDataCoverage] = useState<TicketDataCoverageRow | null>(null);
   const [ticketDataCoverageLoading, setTicketDataCoverageLoading] = useState(false);
   const [ticketDataCoverageError, setTicketDataCoverageError] = useState<string | null>(null);
+  const [hubAnalyticsBaseline, setHubAnalyticsBaseline] = useState<HubAnalyticsBaselineRow | null>(null);
+  const [hubAnalyticsBaselineLoading, setHubAnalyticsBaselineLoading] = useState(false);
+  const [hubAnalyticsBaselineError, setHubAnalyticsBaselineError] = useState<string | null>(null);
 
   const [generatingDigest, setGeneratingDigest] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1927,6 +2421,23 @@ export default function Hub() {
         const retryMessage = retryError instanceof Error ? retryError.message : "Unknown retry error.";
         throw new Error(`${primaryMessage} | Retry failed: ${retryMessage}`);
       }
+    }
+  }
+
+  async function trackHubEvent(eventName: string, metadata: Record<string, unknown> = {}) {
+    if (!authorized) return;
+    try {
+      const payload: HubAnalyticsTrackResponse = await invokeFunctionRobust<HubAnalyticsTrackResponse>("hub_analytics", {
+        event_name: eventName,
+        route: location.pathname,
+        metadata,
+      });
+      if (!payload.ok) {
+        console.warn(`Hub analytics event rejected: ${payload.error || "unknown_error"}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown analytics track error.";
+      console.warn("Hub analytics tracking failed", message);
     }
   }
 
@@ -2153,13 +2664,23 @@ export default function Hub() {
         }));
       };
 
-      setWeeklyReportRows(normalizeRows((currentResult.data || []) as WeeklyTicketReportRow[]));
-      setWeeklyReportPreviousRows(normalizeRows((previousResult.data || []) as WeeklyTicketReportRow[]));
+      const currentRows = normalizeRows((currentResult.data || []) as WeeklyTicketReportRow[]);
+      const previousRows = normalizeRows((previousResult.data || []) as WeeklyTicketReportRow[]);
+      setWeeklyReportRows(currentRows);
+      setWeeklyReportPreviousRows(previousRows);
+      void trackHubEvent("weekly_report_refreshed", {
+        start_date: selectedStartDate,
+        rows: currentRows.length,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load weekly report.";
       setWeeklyReportError(message);
       setWeeklyReportRows([]);
       setWeeklyReportPreviousRows([]);
+      void trackHubEvent("weekly_report_refresh_failed", {
+        start_date: weeklyReportStartDate,
+        message,
+      });
     } finally {
       setWeeklyReportLoading(false);
     }
@@ -2217,6 +2738,10 @@ export default function Hub() {
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       toast({ title: "Copied", description: "Weekly report summary copied." });
+      void trackHubEvent("weekly_summary_copied", {
+        start_date: weeklyReportStartDate,
+        rows: weeklyReportRows.length,
+      });
     } catch {
       toast({ title: "Copy failed", description: "Clipboard is not available.", variant: "destructive" });
     }
@@ -2244,10 +2769,18 @@ export default function Hub() {
       }));
 
       setReceivedRollupRows(rows);
+      void trackHubEvent("received_rollup_refreshed", {
+        reference_date: receivedRollupReferenceDate,
+        rows: rows.length,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load monthly/quarterly/yearly intake.";
       setReceivedRollupError(message);
       setReceivedRollupRows([]);
+      void trackHubEvent("received_rollup_refresh_failed", {
+        reference_date: receivedRollupReferenceDate,
+        message,
+      });
     } finally {
       setReceivedRollupLoading(false);
     }
@@ -2285,6 +2818,44 @@ export default function Hub() {
       setTicketDataCoverage(null);
     } finally {
       setTicketDataCoverageLoading(false);
+    }
+  }
+
+  async function refreshHubAnalyticsBaseline() {
+    setHubAnalyticsBaselineLoading(true);
+    setHubAnalyticsBaselineError(null);
+
+    try {
+      const { data, error } = await supabase.rpc("get_hub_analytics_baseline", {
+        period_days: 14,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const row = Array.isArray(data) && data.length > 0 ? data[0] as HubAnalyticsBaselineRow : null;
+      if (!row) {
+        setHubAnalyticsBaseline(null);
+        return;
+      }
+
+      setHubAnalyticsBaseline({
+        ...row,
+        total_events: Number(row.total_events || 0),
+        unique_users: Number(row.unique_users || 0),
+        copilot_queries: Number(row.copilot_queries || 0),
+        citation_clicks: Number(row.citation_clicks || 0),
+        weekly_reports_refreshed: Number(row.weekly_reports_refreshed || 0),
+        rollup_reports_refreshed: Number(row.rollup_reports_refreshed || 0),
+        sql_reports_generated: Number(row.sql_reports_generated || 0),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load hub analytics baseline.";
+      setHubAnalyticsBaselineError(message);
+      setHubAnalyticsBaseline(null);
+    } finally {
+      setHubAnalyticsBaselineLoading(false);
     }
   }
 
@@ -2335,6 +2906,10 @@ export default function Hub() {
     try {
       await navigator.clipboard.writeText(lines.join("\n").trim());
       toast({ title: "Copied", description: "M/Q/Y intake summary copied." });
+      void trackHubEvent("received_rollup_summary_copied", {
+        reference_date: receivedRollupReferenceDate,
+        rows: receivedRollupRows.length,
+      });
     } catch {
       toast({ title: "Copy failed", description: "Clipboard is not available.", variant: "destructive" });
     }
@@ -2626,6 +3201,21 @@ export default function Hub() {
     }
 
     void refreshTicketDataCoverage();
+  }, [authorized, inReportsRoute, refreshKey]);
+
+  useEffect(() => {
+    if (!authorized) {
+      setHubAnalyticsBaseline(null);
+      setHubAnalyticsBaselineError(null);
+      setHubAnalyticsBaselineLoading(false);
+      return;
+    }
+
+    if (!inReportsRoute) {
+      return;
+    }
+
+    void refreshHubAnalyticsBaseline();
   }, [authorized, inReportsRoute, refreshKey]);
 
   useEffect(() => {
@@ -3113,7 +3703,12 @@ export default function Hub() {
     }
   }
 
-  async function handleCopilotAsk(messages: CopilotChatInputMessage[]): Promise<string> {
+  async function handleCopilotAsk(messages: CopilotChatInputMessage[]): Promise<{ reply: string; citations: CopilotCitation[] }> {
+    void trackHubEvent("copilot_query_submitted", {
+      message_count: messages.length,
+      latest_message_length: messages[messages.length - 1]?.content.length ?? 0,
+    });
+
     const data = await invokeFunctionRobust<CopilotChatResponse>("copilot_chat", {
       messages,
       context: {
@@ -3124,10 +3719,33 @@ export default function Hub() {
     });
 
     if (!data.ok) {
+      void trackHubEvent("copilot_query_failed", {
+        message_count: messages.length,
+        error: data.error || "copilot_response_failed",
+      });
       throw new Error(data.error || "Copilot response failed.");
     }
 
-    return data.reply;
+    const citations = Array.isArray(data.citations) ? data.citations : [];
+    void trackHubEvent("copilot_query_completed", {
+      message_count: messages.length,
+      citation_count: citations.length,
+      model: data.model || null,
+    });
+
+    return {
+      reply: data.reply,
+      citations,
+    };
+  }
+
+  function handleCopilotCitationClick(citation: CopilotCitation) {
+    void trackHubEvent("copilot_citation_clicked", {
+      source_type: citation.source_type,
+      title: citation.title,
+      ticket_id: citation.ticket_id ?? null,
+      similarity: citation.similarity ?? null,
+    });
   }
 
   const allTicketCount = omniOneTickets.length + omniArenaTickets.length;
@@ -3379,6 +3997,9 @@ export default function Hub() {
               receivedRollupRows={receivedRollupRows}
               receivedRollupLoading={receivedRollupLoading}
               receivedRollupError={receivedRollupError}
+              analyticsBaseline={hubAnalyticsBaseline}
+              analyticsBaselineLoading={hubAnalyticsBaselineLoading}
+              analyticsBaselineError={hubAnalyticsBaselineError}
               coverage={ticketDataCoverage}
               coverageLoading={ticketDataCoverageLoading}
               coverageError={ticketDataCoverageError}
@@ -3392,6 +4013,9 @@ export default function Hub() {
               onRefreshReceivedRollup={refreshReceivedRollup}
               onCopySummary={handleCopyWeeklySummary}
               onCopyReceivedRollupSummary={handleCopyReceivedRollupSummary}
+              onTrackEvent={(eventName, metadata) => {
+                void trackHubEvent(eventName, metadata ?? {});
+              }}
             />
           ) : (
             <section className="grid gap-5 2xl:grid-cols-2">
@@ -3453,7 +4077,7 @@ export default function Hub() {
         </SheetContent>
       </Sheet>
 
-      <CopilotChatDock onAsk={handleCopilotAsk} />
+      <CopilotChatDock onAsk={handleCopilotAsk} onCitationClick={handleCopilotCitationClick} />
 
       <TicketDrawer
         open={ticketDrawerOpen}

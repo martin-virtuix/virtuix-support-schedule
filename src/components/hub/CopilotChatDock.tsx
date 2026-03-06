@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, MessageSquare, Minimize2, Plus, Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import type { CopilotCitation } from "@/types/support";
 
 export type CopilotChatInputMessage = {
   role: "user" | "assistant";
@@ -12,6 +13,7 @@ type ChatMessage = CopilotChatInputMessage & {
   id: string;
   createdAt: number;
   isError?: boolean;
+  citations?: CopilotCitation[];
 };
 
 type ChatSession = {
@@ -44,6 +46,13 @@ function createMessage(role: "user" | "assistant", content: string, isError = fa
     content,
     isError,
     createdAt: Date.now(),
+  };
+}
+
+function createAssistantMessage(content: string, citations: CopilotCitation[] = [], isError = false): ChatMessage {
+  return {
+    ...createMessage("assistant", content, isError),
+    citations,
   };
 }
 
@@ -87,8 +96,10 @@ function sortSessionsByUpdatedAt(sessions: ChatSession[]): ChatSession[] {
 
 export function CopilotChatDock({
   onAsk,
+  onCitationClick,
 }: {
-  onAsk: (messages: CopilotChatInputMessage[]) => Promise<string>;
+  onAsk: (messages: CopilotChatInputMessage[]) => Promise<{ reply: string; citations: CopilotCitation[] }>;
+  onCitationClick?: (citation: CopilotCitation) => void;
 }) {
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createSession(1)]);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => "");
@@ -235,8 +246,8 @@ export function CopilotChatDock({
     );
 
     try {
-      const reply = await onAsk(history);
-      const assistantMessage = createMessage("assistant", reply);
+      const response = await onAsk(history);
+      const assistantMessage = createAssistantMessage(response.reply, response.citations);
       const shouldMarkUnread = !openRef.current || activeSessionRef.current !== activeSession.id;
 
       setSessions((prev) =>
@@ -256,7 +267,7 @@ export function CopilotChatDock({
       }
     } catch (error) {
       const details = error instanceof Error ? error.message : "Copilot request failed.";
-      const assistantMessage = createMessage("assistant", `Error: ${details}`, true);
+      const assistantMessage = createAssistantMessage(`Error: ${details}`, [], true);
       const shouldMarkUnread = !openRef.current || activeSessionRef.current !== activeSession.id;
 
       setSessions((prev) =>
@@ -382,6 +393,37 @@ export function CopilotChatDock({
                           ].join(" ")}
                         >
                           <p className="whitespace-pre-wrap">{message.content}</p>
+                          {message.role === "assistant" && !message.isError && Array.isArray(message.citations) && message.citations.length > 0 ? (
+                            <div className="mt-2 space-y-1.5 rounded-lg border border-primary/20 bg-background/65 p-2">
+                              <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Sources</p>
+                              <ul className="space-y-1">
+                                {message.citations.map((citation, citationIndex) => (
+                                  <li key={`${message.id}-citation-${citationIndex}`} className="text-[11px] leading-4">
+                                    {citation.url ? (
+                                      <a
+                                        href={citation.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="underline decoration-primary/45 hover:decoration-primary"
+                                        onClick={() => onCitationClick?.(citation)}
+                                      >
+                                        {citation.title}
+                                      </a>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="text-left underline decoration-primary/45 hover:decoration-primary"
+                                        onClick={() => onCitationClick?.(citation)}
+                                      >
+                                        {citation.title}
+                                      </button>
+                                    )}
+                                    <p className="text-[10px] text-muted-foreground">{citation.reference}</p>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
                           <p className="mt-1 text-[10px] opacity-70">{getTimeLabel(message.createdAt)}</p>
                         </div>
                       </div>

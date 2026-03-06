@@ -415,3 +415,63 @@ Changes:
 
 Validation:
 - `~/.deno/bin/deno check supabase/functions/sync_zendesk/index.ts` passed.
+
+### Iteration 21: Copilot Citations + Hub Analytics Baseline + SQL Import Report Builder
+Changes:
+- Extended copilot retrieval to combine document chunk evidence and ticket-history evidence in:
+  - `supabase/functions/copilot_chat/index.ts`
+  - pulls semantic document matches via `match_support_document_chunks`
+  - pulls relevant ticket candidates from `ticket_cache`
+  - injects retrieved evidence into LLM context and returns structured `citations[]`.
+- Upgraded chat UI to render source citations per assistant reply and track citation clicks:
+  - `src/components/hub/CopilotChatDock.tsx`
+  - `src/pages/Hub.tsx`
+  - `src/types/support.ts`
+- Added analytics ingestion edge function:
+  - `supabase/functions/hub_analytics/index.ts`
+  - records event name, route, user, metadata into analytics table.
+- Added Supabase function config entry:
+  - `supabase/config.toml` (`[functions.hub_analytics] verify_jwt = false`).
+- Added analytics schema + baseline RPC migration:
+  - `supabase/migrations/20260302001000_add_hub_analytics_events_and_baseline.sql`
+  - creates `public.hub_analytics_events`
+  - adds `public.get_hub_analytics_baseline(period_days integer default 14)`.
+- Added frontend analytics instrumentation and baseline dashboard card:
+  - tracks copilot queries/completions/failures, citation clicks, weekly and rollup refresh/copy actions, SQL import report generation.
+  - displays 14-day baseline metrics inside `/hub/reports`.
+- Added SQL Import Report Builder (CSV/TSV paste) to `/hub/reports`:
+  - parse and normalize imported ticket rows (brand/status/date),
+  - render range-based report cards (Total, Omni One, Omni Arena, Other),
+  - render imported monthly/quarterly/yearly intake cards,
+  - copy generated imported summary text.
+
+Validation:
+- `~/.deno/bin/deno check supabase/functions/copilot_chat/index.ts` passed.
+- `~/.deno/bin/deno check supabase/functions/hub_analytics/index.ts` passed.
+- `npm run build` passed.
+- `npm run test -- --run` passed.
+
+### Iteration 22: SQL Import Builder Reworked for HeidiSQL Venue Metrics
+Changes:
+- Replaced ticket-oriented SQL import parsing/reporting in `src/pages/Hub.tsx` with venue-performance parsing for HeidiSQL query output.
+- Updated parser to require and normalize these headers:
+  - `Venue`
+  - `Total_Plays`
+  - `Unique_Players`
+- Added robust numeric parsing for quoted and comma-formatted numeric cells.
+- Rebuilt imported report metrics to output:
+  - Total Plays
+  - Unique Players
+  - Venue Count
+  - Avg Plays per Venue
+  - Avg Unique Players per Venue
+  - Avg Plays per Player
+- Replaced old imported brand/period cards with:
+  - metric cards for the six venue KPIs above,
+  - top-10 venues table (plays, unique players, plays/player).
+- Updated copy-summary generator to produce management-ready venue performance summary text (with top venues list).
+- Kept a single import mode as requested; no second mode was introduced.
+
+Validation:
+- `npm run build` passed.
+- `npm run test -- --run` passed.

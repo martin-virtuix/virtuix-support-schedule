@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.semantic_search_documents]
 verify_jwt = false
+
+[functions.hub_analytics]
+verify_jwt = false
