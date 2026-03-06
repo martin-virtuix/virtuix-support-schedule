@@ -690,3 +690,36 @@ Modified (major):
 - `npm run build` passed.
 - Edge functions deployed successfully to project:
   - `ddqacivmenvlidzxxhyv`
+
+## Session Continuation (2026-03-06)
+
+### Iteration 21) Copilot Citations + Hub Analytics + SQL Import Foundation
+- Extended `copilot_chat` to return evidence-backed responses with structured citations from:
+  - support document semantic matches (`match_support_document_chunks`)
+  - ticket history cache (`ticket_cache`)
+- Updated Hub chat UI to render citations per assistant response and track citation clicks.
+- Added new edge function `hub_analytics` plus migration `20260302001000_add_hub_analytics_events_and_baseline.sql`:
+  - event ingestion table `public.hub_analytics_events`
+  - baseline RPC `public.get_hub_analytics_baseline(period_days)`
+- Instrumented key `/hub` actions (copilot usage, report refresh/copy, SQL report generation).
+- Added SQL Import Report Builder in `/hub/reports` (initial version) to parse pasted CSV/TSV rows and generate summary output.
+
+### Iteration 22) SQL Import Rework for HeidiSQL Venue Metrics
+- Reworked the existing SQL Import Report Builder (no second mode) for HeidiSQL venue output.
+- Parser now expects:
+  - `Venue`
+  - `Total_Plays`
+  - `Unique_Players`
+- Added numeric normalization for quoted/comma-formatted values.
+- Replaced ticket-centric imported cards with venue-centric KPIs:
+  - Total Plays
+  - Unique Players
+  - Venue Count
+  - Avg Plays / Venue
+  - Avg Unique / Venue
+  - Plays / Player
+- Added Top 10 venues table (plays, unique players, plays/player) and updated clipboard summary text accordingly.
+
+### Verification (Latest Iterations)
+- `npm run build` passed.
+- `npm run test -- --run` passed.
