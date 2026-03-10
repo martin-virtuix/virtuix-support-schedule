@@ -67,6 +67,21 @@ export async function authorizeVirtuixRequest(
   }
 
   const token = getBearerToken(req, authDebug);
+
+  // Support both JWT-style service role keys and opaque secret keys.
+  if (SUPABASE_SERVICE_ROLE_KEY && token === SUPABASE_SERVICE_ROLE_KEY) {
+    if (!options.allowServiceRole) {
+      throw new HttpError(403, "Service-role token is not allowed for this action.", "auth_service_role_forbidden", {
+        auth_debug: authDebug,
+      });
+    }
+    return {
+      role: "service_role",
+      userId: null,
+      email: null,
+    };
+  }
+
   const claims = decodeJwtClaims(token);
   const role = typeof claims?.role === "string" ? claims.role : "";
 

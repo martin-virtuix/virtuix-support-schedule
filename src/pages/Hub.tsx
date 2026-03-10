@@ -28,6 +28,7 @@ import type {
   TicketDataCoverageRow,
   TicketReceivedRollupRow,
   TicketSummary,
+  WeeklyTicketReportDispatchResponse,
   WeeklyTicketReportRow,
 } from "@/types/support";
 import virtuixLogoWhite from "@/assets/virtuix_logo_white.png";
@@ -1013,8 +1014,8 @@ function SideNavigation({
   onNavigate: () => void;
 }) {
   const linkClasses =
-    "rounded-lg border border-transparent px-3.5 py-2.5 text-[15px] font-medium text-muted-foreground transition hover:border-border/70 hover:bg-background/45 hover:text-foreground";
-  const activeClasses = "border-primary/35 bg-primary/10 text-primary";
+    "rounded-xl border border-transparent px-3.5 py-2.5 text-[14px] font-medium text-muted-foreground transition hover:border-border/75 hover:bg-muted/45 hover:text-foreground";
+  const activeClasses = "border-primary/40 bg-primary/12 text-primary";
 
   return (
     <div className="flex h-full flex-col surface-panel p-4">
@@ -1053,8 +1054,8 @@ function SideNavigation({
           Reports
         </NavLink>
       </nav>
-      <div className="mt-auto space-y-3 rounded-lg border border-border/65 bg-background/45 p-3">
-        <p className="text-[12px] leading-5 text-muted-foreground break-all">{userEmail}</p>
+      <div className="mt-auto space-y-3 rounded-xl border border-border/65 bg-background/45 p-3">
+        <p className="break-all text-[12px] leading-5 text-muted-foreground">{userEmail}</p>
         <Button variant="secondary" className="w-full" onClick={onSignOut}>
           Sign out
         </Button>
@@ -1109,13 +1110,13 @@ function TicketTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-3 rounded-xl border border-border/65 bg-background/45 p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="surface-panel-soft flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search subject or requester..."
-            className="h-8 w-full sm:w-[260px]"
+            className="h-9 w-full sm:w-[260px]"
           />
           {(["all", "open", "pending", "new"] as const).map((status) => (
             <Button
@@ -1149,7 +1150,53 @@ function TicketTable({
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-border/65 bg-background/55 shadow-inner">
+      <div className="space-y-2 lg:hidden">
+        {loading ? (
+          <p className="surface-panel-soft p-4 text-sm text-muted-foreground">Loading tickets...</p>
+        ) : error ? (
+          <p className="surface-panel-soft p-4 text-sm text-destructive">{error}</p>
+        ) : filteredRows.length === 0 ? (
+          <p className="surface-panel-soft p-4 text-sm text-muted-foreground">No tickets for current filter.</p>
+        ) : (
+          filteredRows.map((row) => {
+            const requester = row.requester_name || row.requester_email || "-";
+            return (
+              <article key={`mobile-${row.ticket_id}`} className="surface-panel-soft space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={selectedIds.has(row.ticket_id)}
+                      onCheckedChange={(checked) => onSelectionChange(row.ticket_id, checked === true)}
+                      aria-label={`Select ticket ${row.ticket_id}`}
+                    />
+                    <p className="text-sm font-semibold text-foreground">#{row.ticket_id}</p>
+                  </div>
+                  <span
+                    className={[
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.1em]",
+                      statusPillClasses(row.status),
+                    ].join(" ")}
+                  >
+                    {row.status}
+                  </span>
+                </div>
+                <button
+                  className="w-full text-left text-sm font-medium leading-6 underline decoration-muted-foreground/40 hover:decoration-foreground"
+                  onClick={() => onOpenTicket(row)}
+                >
+                  {row.subject}
+                </button>
+                <div className="space-y-1 text-[12px] leading-5 text-muted-foreground">
+                  <p>Requester: {requester}</p>
+                  <p>Updated: {formatDateTime(row.zendesk_updated_at)}</p>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div className="table-shell hidden lg:block">
         <div className="max-h-[520px] overflow-y-auto">
           <table className="w-full text-[14px] md:text-[15px]">
             <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
@@ -1250,15 +1297,15 @@ function TicketDrawer({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
-        <SheetHeader>
-          <SheetTitle>{ticket ? `Ticket #${ticket.ticket_id}` : "Ticket"}</SheetTitle>
-          <SheetDescription>{ticket?.subject || "No ticket selected"}</SheetDescription>
+      <SheetContent side="right" className="w-full overflow-y-auto border-border/70 bg-background/98 sm:max-w-2xl">
+        <SheetHeader className="space-y-1 border-b border-border/55 pb-4">
+          <SheetTitle className="font-display text-2xl tracking-tight">{ticket ? `Ticket #${ticket.ticket_id}` : "Ticket"}</SheetTitle>
+          <SheetDescription className="text-sm leading-6">{ticket?.subject || "No ticket selected"}</SheetDescription>
         </SheetHeader>
 
         {ticket ? (
           <div className="mt-6 space-y-4">
-            <div className="grid gap-3 rounded-lg border bg-card/60 p-4 text-sm sm:grid-cols-2">
+            <div className="surface-panel-soft grid gap-3 p-4 text-sm sm:grid-cols-2">
               <p><span className="text-muted-foreground">Brand:</span> {ticket.brand}</p>
               <p><span className="text-muted-foreground">Status:</span> {ticket.status}</p>
               <p><span className="text-muted-foreground">Priority:</span> {ticket.priority || "-"}</p>
@@ -1285,9 +1332,9 @@ function TicketDrawer({
               ) : null}
             </div>
 
-            <div className="rounded-lg border bg-background/50 p-4">
-              <h3 className="mb-2 text-sm font-semibold">Summary</h3>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+            <div className="surface-panel-soft p-4">
+              <h3 className="mb-2 text-sm font-semibold uppercase tracking-[0.11em] text-muted-foreground">Summary</h3>
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">
                 {summary?.summary_text || ticket.summary_text || "No summary yet. Click Refresh Summary to generate one."}
               </p>
 
@@ -1343,19 +1390,21 @@ function DigestsPane({
 
   return (
     <section className="grid gap-5 xl:h-[calc(100vh-15rem)] xl:grid-cols-[420px_minmax(0,1fr)] 2xl:grid-cols-[500px_minmax(0,1fr)]">
-      <div className="surface-panel p-5 xl:flex xl:min-h-0 xl:h-full xl:flex-col">
+      <div className="surface-panel p-5 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
         <h2 className="mb-3 text-base font-semibold tracking-tight">Recent Digests</h2>
         {loading ? <p className="text-sm text-muted-foreground">Loading digests...</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {!loading && !error ? (
-          <div className="space-y-2 xl:min-h-0 xl:flex-1 xl:overflow-auto pr-1">
+          <div className="space-y-2 pr-1 xl:min-h-0 xl:flex-1 xl:overflow-auto">
             {digests.map((digest) => (
               <button
                 key={digest.id}
                 onClick={() => onSelectDigest(digest.id)}
                 className={[
-                  "w-full rounded-lg border px-4 py-3 text-left text-[15px] transition",
-                  selectedDigestId === digest.id ? "bg-muted border-primary/40" : "hover:bg-muted/40",
+                  "w-full rounded-xl border border-border/70 bg-background/45 px-4 py-3 text-left text-[15px] transition",
+                  selectedDigestId === digest.id
+                    ? "border-primary/45 bg-primary/[0.11] shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]"
+                    : "hover:border-primary/35 hover:bg-muted/35",
                 ].join(" ")}
               >
                 <p className="font-medium">{digest.title}</p>
@@ -1367,7 +1416,7 @@ function DigestsPane({
         ) : null}
       </div>
 
-      <div className="surface-panel p-5 xl:flex xl:min-h-0 xl:h-full xl:flex-col">
+      <div className="surface-panel p-5 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
         {selected ? (
           <div className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1391,7 +1440,7 @@ function DigestsPane({
               </div>
             </div>
 
-            <div className="rounded-xl border border-primary/25 bg-gradient-to-b from-[#161616] to-[#0f0f0f] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] overflow-hidden xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <div className="overflow-hidden rounded-xl border border-primary/25 bg-gradient-to-b from-[#171d12] via-[#111610] to-[#0c100b] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
               <div className="border-b border-primary/20 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary/90">
                 Digest Result
               </div>
@@ -1482,7 +1531,7 @@ function DocumentsPane({
 
   return (
     <section className="grid gap-5 xl:h-[calc(100vh-15rem)] xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[520px_minmax(0,1fr)]">
-      <div className="surface-panel p-5 xl:flex xl:min-h-0 xl:h-full xl:flex-col">
+      <div className="surface-panel p-5 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
         <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold tracking-tight">Documents</h2>
           <Button size="sm" variant="outline" onClick={() => void onRefresh()} disabled={loading}>
@@ -1497,11 +1546,16 @@ function DocumentsPane({
               key={brand}
               size="sm"
               variant={activeBrand === brand ? "secondary" : "ghost"}
-              className="h-9 gap-2"
+              className={`h-10 gap-0 px-2.5 ${brand === "omni_arena" ? "min-w-[108px]" : "min-w-[72px]"}`}
+              aria-label={brandMeta[brand].label}
+              title={brandMeta[brand].label}
               onClick={() => onSelectBrand(brand)}
             >
-              <img src={brandMeta[brand].logo} alt={brandMeta[brand].label} className="h-4 w-auto" />
-              {brandMeta[brand].label}
+              <img
+                src={brandMeta[brand].logo}
+                alt={brandMeta[brand].label}
+                className={`w-auto shrink-0 object-contain ${brand === "omni_arena" ? "h-[18px]" : "h-5"}`}
+              />
             </Button>
           ))}
         </div>
@@ -1540,7 +1594,7 @@ function DocumentsPane({
             void onSemanticSearch();
           }}
         >
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               value={semanticQuery}
               onChange={(event) => onSemanticQueryChange(event.target.value)}
@@ -1550,14 +1604,14 @@ function DocumentsPane({
               type="submit"
               size="sm"
               variant="outline"
-              className="h-10 shrink-0"
+              className="h-10 shrink-0 sm:w-auto"
               disabled={semanticSearching || semanticQuery.trim().length === 0}
             >
               {semanticSearching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Search
             </Button>
           </div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[12px] text-muted-foreground">Searches indexed chunks for this selected scope.</p>
             {(semanticResults.length > 0 || semanticError) && !semanticSearching ? (
               <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={onClearSemanticSearch}>
@@ -1569,13 +1623,13 @@ function DocumentsPane({
         </form>
 
         {semanticResults.length > 0 ? (
-          <div className="mb-3 space-y-2 rounded-lg border bg-background/50 p-2">
+          <div className="surface-panel-soft mb-3 space-y-2 p-2">
             <p className="px-1 text-[12px] font-medium text-muted-foreground">{semanticResults.length} semantic matches</p>
             <div className="max-h-52 space-y-2 overflow-auto pr-1">
               {semanticResults.map((result) => (
                 <button
                   key={result.chunk_id}
-                  className="w-full rounded-lg border px-3 py-3 text-left transition hover:bg-muted/40"
+                  className="w-full rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-left transition hover:border-primary/35 hover:bg-muted/35"
                   onClick={() => onSelectSemanticResult(result)}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -1591,7 +1645,7 @@ function DocumentsPane({
           </div>
         ) : null}
 
-        <div className="xl:min-h-0 xl:flex-1 xl:overflow-auto space-y-2 pr-1">
+        <div className="space-y-2 pr-1 xl:min-h-0 xl:flex-1 xl:overflow-auto">
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading documents...</p>
           ) : error ? (
@@ -1607,8 +1661,10 @@ function DocumentsPane({
               <button
                 key={document.path}
                 className={[
-                  "w-full rounded-lg border px-3 py-2 text-left transition",
-                  selectedDocumentPath === document.path ? "bg-muted border-primary/40" : "hover:bg-muted/40",
+                  "w-full rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-left transition",
+                  selectedDocumentPath === document.path
+                    ? "border-primary/45 bg-primary/[0.11] shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]"
+                    : "hover:border-primary/35 hover:bg-muted/35",
                 ].join(" ")}
                 onClick={() => onSelectDocument(document)}
               >
@@ -1627,7 +1683,7 @@ function DocumentsPane({
         </div>
       </div>
 
-      <div className="surface-panel p-5 xl:flex xl:min-h-0 xl:h-full xl:flex-col">
+      <div className="surface-panel p-5 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
         {selectedDocument ? (
           <div className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1660,7 +1716,7 @@ function DocumentsPane({
               </div>
             </div>
 
-            <div className="relative min-h-[68vh] overflow-hidden rounded-xl border bg-background/70 shadow-inner xl:min-h-0 xl:flex-1">
+            <div className="table-shell relative min-h-[52vh] overflow-hidden xl:min-h-0 xl:flex-1">
               {previewLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1679,7 +1735,7 @@ function DocumentsPane({
                   key={previewUrlWithPage}
                   src={previewUrlWithPage}
                   title={`Preview ${selectedDocument.name}`}
-                  className="h-[68vh] w-full xl:h-full"
+                  className="h-[52vh] w-full xl:h-full"
                 />
               ) : null}
 
@@ -1722,6 +1778,11 @@ function ReportsPane({
   onRefreshReceivedRollup,
   onCopySummary,
   onCopyReceivedRollupSummary,
+  dispatchPreview,
+  dispatchLoading,
+  onPreviewDispatch,
+  onSendDispatch,
+  onClearDispatchPreview,
   onTrackEvent,
 }: {
   rows: WeeklyTicketReportRow[];
@@ -1745,6 +1806,11 @@ function ReportsPane({
   onRefreshReceivedRollup: () => Promise<void>;
   onCopySummary: () => Promise<void>;
   onCopyReceivedRollupSummary: () => Promise<void>;
+  dispatchPreview: string | null;
+  dispatchLoading: boolean;
+  onPreviewDispatch: () => Promise<void>;
+  onSendDispatch: () => Promise<void>;
+  onClearDispatchPreview: () => void;
   onTrackEvent?: (eventName: string, metadata?: Record<string, unknown>) => void;
 }) {
   const labels: Record<string, string> = {
@@ -1861,7 +1927,7 @@ function ReportsPane({
           </p>
         </div>
 
-        <div className="rounded-xl border border-border/65 bg-background/45 p-3">
+        <div className="surface-panel-soft p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Data Coverage</p>
           {coverageLoading ? <p className="mt-2 text-[13px] text-muted-foreground">Checking coverage...</p> : null}
           {!coverageLoading && coverageError ? <p className="mt-2 text-[13px] text-destructive">{coverageError}</p> : null}
@@ -1884,7 +1950,7 @@ function ReportsPane({
           ) : null}
         </div>
 
-        <div className="rounded-xl border border-border/65 bg-background/45 p-3">
+        <div className="surface-panel-soft p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Hub Analytics (Last 14 Days)</p>
           {analyticsBaselineLoading ? <p className="mt-2 text-[13px] text-muted-foreground">Loading baseline metrics...</p> : null}
           {!analyticsBaselineLoading && analyticsBaselineError ? (
@@ -1907,7 +1973,7 @@ function ReportsPane({
           ) : null}
         </div>
 
-        <div className="space-y-2 rounded-xl border border-border/65 bg-background/45 p-3">
+        <div className="surface-panel-soft space-y-2 p-3">
           <label htmlFor="week-start" className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Week Start Date
           </label>
@@ -1947,7 +2013,7 @@ function ReportsPane({
           ) : null}
         </div>
 
-        <div className="rounded-xl border border-border/65 bg-background/45 p-3">
+        <div className="surface-panel-soft p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Period</p>
           <p className="mt-1 text-[15px] font-medium">{periodLabel || "-"}</p>
           {previousPeriodLabel ? (
@@ -1960,7 +2026,7 @@ function ReportsPane({
           ) : null}
         </div>
 
-        <div className="space-y-2 rounded-xl border border-border/65 bg-background/45 p-3">
+        <div className="surface-panel-soft space-y-2 p-3">
           <label htmlFor="rollup-reference-date" className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Intake Search Date
           </label>
@@ -2008,9 +2074,34 @@ function ReportsPane({
             </p>
           ) : null}
         </div>
+
+        <div className="surface-panel-soft space-y-2 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Weekly Dispatch Test</p>
+          <Button variant="outline" size="sm" className="w-full" onClick={() => void onPreviewDispatch()} disabled={dispatchLoading}>
+            {dispatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+            Preview Slack Format
+          </Button>
+          <Button variant="secondary" size="sm" className="w-full" onClick={() => void onSendDispatch()} disabled={dispatchLoading}>
+            {dispatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+            Send Test to Slack + Email
+          </Button>
+          <p className="text-[12px] leading-5 text-muted-foreground">
+            Preview does not send anything. Send Test runs the full dispatch immediately.
+          </p>
+          {dispatchPreview ? (
+            <>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-border/65 bg-background/55 p-2">
+                <pre className="whitespace-pre-wrap text-[12px] leading-5 text-foreground">{dispatchPreview}</pre>
+              </div>
+              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={onClearDispatchPreview}>
+                Clear Preview
+              </Button>
+            </>
+          ) : null}
+        </div>
       </div>
 
-      <div className="surface-panel p-5 space-y-4">
+      <div className="surface-panel space-y-4 p-5">
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading weekly report...</p>
         ) : error ? (
@@ -2080,32 +2171,63 @@ function ReportsPane({
               ))}
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-border/65 bg-background/55 shadow-inner">
+            <div className="space-y-2 lg:hidden">
+              {sortedRows.map((row) => {
+                const previous = previousRowsByBrand.get(row.brand);
+                return (
+                  <article
+                    key={`mobile-weekly-${row.brand}`}
+                    className={[
+                      "surface-panel-soft space-y-2 p-4",
+                      activeWeeklyBrand === row.brand ? "border-primary/45 bg-primary/[0.11]" : "",
+                    ].join(" ")}
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      {labels[row.brand] ?? row.brand}
+                    </p>
+                    <p className="text-2xl font-semibold tracking-tight">{row.received_count}</p>
+                    <div className="space-y-1 text-[13px] leading-5 text-muted-foreground">
+                      <p>Solved/Closed: <span className="font-medium text-foreground">{row.solved_closed_count}</span></p>
+                      <p>Still Open: <span className="font-medium text-foreground">{row.still_open_count}</span></p>
+                      <p>Resolution Rate: <span className="font-medium text-foreground">{(row.resolution_rate * 100).toFixed(1)}%</span></p>
+                      <p>
+                        WoW Received:{" "}
+                        <span className="font-medium text-foreground">
+                          {previous ? formatSignedIntDelta(row.received_count - previous.received_count) : "-"}
+                        </span>
+                      </p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="table-shell hidden lg:block">
               <table className="w-full text-[14px] md:text-[15px]">
                 <thead className="bg-muted/55">
                   <tr>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Brand</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Received</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">WoW Received</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Solved/Closed</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">WoW Solved</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Still Open</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">WoW Open</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Resolution Rate</th>
-                    <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">WoW Rate</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Brand</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Received</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Received</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Solved/Closed</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Solved</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Still Open</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Open</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Resolution Rate</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Rate</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedRows.map((row) => {
                     const previous = previousRowsByBrand.get(row.brand);
                     return (
-                    <tr
-                      key={`table-${row.brand}`}
-                      className={[
-                        "border-t border-border/35 transition-colors",
-                        activeWeeklyBrand === row.brand ? "bg-primary/10" : "",
-                      ].join(" ")}
-                    >
+                      <tr
+                        key={`table-${row.brand}`}
+                        className={[
+                          "border-t border-border/35 transition-colors",
+                          activeWeeklyBrand === row.brand ? "bg-primary/10" : "",
+                        ].join(" ")}
+                      >
                         <td className="px-4 py-3 font-medium">{labels[row.brand] ?? row.brand}</td>
                         <td className="px-4 py-3">{row.received_count}</td>
                         <td className="px-4 py-3">{previous ? formatSignedIntDelta(row.received_count - previous.received_count) : "-"}</td>
@@ -2122,7 +2244,7 @@ function ReportsPane({
               </table>
             </div>
 
-            <div className="rounded-xl border border-border/65 bg-background/50 p-4 space-y-4">
+            <div className="surface-panel-soft space-y-4 p-4">
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">Ticket Intake Search (M/Q/Y)</h3>
                 <p className="text-[12px] leading-5 text-muted-foreground">
@@ -2166,16 +2288,54 @@ function ReportsPane({
                     ))}
                   </div>
 
-                  <div className="overflow-x-auto rounded-xl border border-border/65 bg-background/55 shadow-inner">
+                  <div className="space-y-2 lg:hidden">
+                    {orderedBrands.map((brand) => (
+                      <article key={`rollup-mobile-${brand}`} className="surface-panel-soft p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                          {labels[brand] ?? brand}
+                        </p>
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          {orderedPeriods.map((period) => {
+                            const row = receivedRollupMap.get(`${period}:${brand}`) || null;
+                            return (
+                              <div
+                                key={`rollup-mobile-cell-${brand}-${period}`}
+                                className={[
+                                  "rounded-lg border border-border/65 bg-background/50 px-2 py-2 text-[12px]",
+                                  activeRollupPeriod === period ? "border-primary/45 bg-primary/[0.1]" : "",
+                                ].join(" ")}
+                              >
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
+                                  {periodLabels[period] ?? period}
+                                </p>
+                                {row ? (
+                                  <>
+                                    <p className="mt-1 font-semibold text-foreground">{row.received_count}</p>
+                                    <p className="text-[11px] leading-4 text-muted-foreground">
+                                      {formatSignedIntDelta(row.delta)} / {formatPercentDelta(row.delta_pct)}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <p className="mt-1 text-muted-foreground">-</p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="table-shell hidden lg:block">
                     <table className="w-full text-[14px] md:text-[15px]">
                       <thead className="bg-muted/55">
                         <tr>
-                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Brand</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Brand</th>
                           {orderedPeriods.map((period) => (
                             <th
                               key={`rollup-head-${period}`}
                               className={[
-                                "px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold",
+                                "px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
                                 activeRollupPeriod === period ? "bg-primary/12 text-primary" : "",
                               ].join(" ")}
                             >
@@ -2195,7 +2355,7 @@ function ReportsPane({
                                   {row ? (
                                     <div
                                       className={[
-                                        "leading-5 rounded-md px-2 py-1.5 transition-colors",
+                                        "rounded-md px-2 py-1.5 leading-5 transition-colors",
                                         activeRollupPeriod === period ? "bg-primary/10" : "",
                                       ].join(" ")}
                                     >
@@ -2219,7 +2379,7 @@ function ReportsPane({
               )}
             </div>
 
-            <div className="rounded-xl border border-border/65 bg-background/50 p-4 space-y-4">
+            <div className="surface-panel-soft space-y-4 p-4">
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">SQL Import Report Builder</h3>
                 <p className="text-[12px] leading-5 text-muted-foreground">
@@ -2285,15 +2445,30 @@ function ReportsPane({
                     ))}
                   </div>
 
-                  <div className="overflow-x-auto rounded-xl border border-border/65 bg-background/55 shadow-inner">
+                  <div className="space-y-2 lg:hidden">
+                    {sqlImportReport.topVenues.map((venue, index) => (
+                      <article key={`sql-mobile-${index}-${venue.venue}`} className="surface-panel-soft p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold">{index + 1}. {venue.venue}</p>
+                          <span className="brand-chip">P/P {formatDecimalValue(venue.playsPerPlayer)}</span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-muted-foreground">
+                          <p>Total Plays: <span className="font-medium text-foreground">{Math.round(venue.totalPlays).toLocaleString()}</span></p>
+                          <p>Unique Players: <span className="font-medium text-foreground">{Math.round(venue.uniquePlayers).toLocaleString()}</span></p>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="table-shell hidden lg:block">
                     <table className="w-full text-[14px] md:text-[15px]">
                       <thead className="bg-muted/55">
                         <tr>
-                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">#</th>
-                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Venue</th>
-                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Total Plays</th>
-                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Unique Players</th>
-                          <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Plays / Player</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">#</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Venue</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Total Plays</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Unique Players</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Plays / Player</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2395,6 +2570,8 @@ export default function Hub() {
   const [hubAnalyticsBaseline, setHubAnalyticsBaseline] = useState<HubAnalyticsBaselineRow | null>(null);
   const [hubAnalyticsBaselineLoading, setHubAnalyticsBaselineLoading] = useState(false);
   const [hubAnalyticsBaselineError, setHubAnalyticsBaselineError] = useState<string | null>(null);
+  const [weeklyDispatchLoading, setWeeklyDispatchLoading] = useState(false);
+  const [weeklyDispatchPreview, setWeeklyDispatchPreview] = useState<string | null>(null);
 
   const [generatingDigest, setGeneratingDigest] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -2912,6 +3089,68 @@ export default function Hub() {
       });
     } catch {
       toast({ title: "Copy failed", description: "Clipboard is not available.", variant: "destructive" });
+    }
+  }
+
+  async function handlePreviewWeeklyDispatch() {
+    setWeeklyDispatchLoading(true);
+
+    try {
+      const payload = await invokeFunctionRobust<WeeklyTicketReportDispatchResponse>("weekly_ticket_report_dispatch", {
+        dry_run: true,
+        skip_sync: true,
+        week_start_date: weeklyReportStartDate || getCurrentWeekStartDateISO(),
+        reference_date: receivedRollupReferenceDate || toIsoDateOnly(new Date()),
+      });
+
+      if (!payload.ok) {
+        throw new Error(payload.error || "Failed to generate weekly dispatch preview.");
+      }
+
+      const preview = payload.preview_slack || payload.preview_text || "No preview content returned.";
+      setWeeklyDispatchPreview(preview);
+      toast({ title: "Preview ready", description: "Slack preview generated below." });
+      void trackHubEvent("weekly_dispatch_preview_generated", {
+        week_start: payload.week_start_date || weeklyReportStartDate,
+        reference_date: payload.reference_date || receivedRollupReferenceDate,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate weekly dispatch preview.";
+      toast({ title: "Preview failed", description: message, variant: "destructive" });
+      void trackHubEvent("weekly_dispatch_preview_failed", { message });
+    } finally {
+      setWeeklyDispatchLoading(false);
+    }
+  }
+
+  async function handleSendWeeklyDispatchNow() {
+    const confirmed = window.confirm("Send the weekly ticket report now to configured Slack channel and email recipients?");
+    if (!confirmed) return;
+
+    setWeeklyDispatchLoading(true);
+
+    try {
+      const payload = await invokeFunctionRobust<WeeklyTicketReportDispatchResponse>("weekly_ticket_report_dispatch", {
+        week_start_date: weeklyReportStartDate || getCurrentWeekStartDateISO(),
+        reference_date: receivedRollupReferenceDate || toIsoDateOnly(new Date()),
+      });
+
+      if (!payload.ok) {
+        throw new Error(payload.error || "Weekly dispatch send failed.");
+      }
+
+      toast({ title: "Weekly dispatch sent", description: "Slack and email delivery were triggered." });
+      setWeeklyDispatchPreview(null);
+      void trackHubEvent("weekly_dispatch_sent_manual", {
+        week_start: payload.week_start_date || weeklyReportStartDate,
+        reference_date: payload.reference_date || receivedRollupReferenceDate,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Weekly dispatch send failed.";
+      toast({ title: "Dispatch failed", description: message, variant: "destructive" });
+      void trackHubEvent("weekly_dispatch_sent_manual_failed", { message });
+    } finally {
+      setWeeklyDispatchLoading(false);
     }
   }
 
@@ -3749,15 +3988,21 @@ export default function Hub() {
   }
 
   const allTicketCount = omniOneTickets.length + omniArenaTickets.length;
+  const routeTabs = [
+    { label: "Tickets", path: "/hub", active: inTicketRoute },
+    { label: "Digests", path: "/hub/digests", active: inDigestRoute },
+    { label: "Documents", path: "/hub/documents", active: inDocumentsRoute },
+    { label: "Reports", path: "/hub/reports", active: inReportsRoute },
+  ];
 
   if (loadingSession) {
     return (
       <main className="relative min-h-screen overflow-hidden bg-background">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(86,130,3,0.15),transparent_40%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(132,202,65,0.22),transparent_40%)]" />
         <div className="pointer-events-none absolute inset-0 ambient-grid opacity-[0.14]" />
 
-        <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-[#568203]/22 via-[#568203]/8 to-transparent backdrop-blur-sm">
-          <div className="container max-w-[2200px] py-4 px-4">
+        <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-primary/28 via-primary/10 to-transparent backdrop-blur-sm">
+          <div className="container max-w-[2200px] px-4 py-4">
             <Link to="/" className="inline-flex items-center gap-3">
               <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
               <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
@@ -3765,9 +4010,9 @@ export default function Hub() {
           </div>
         </div>
 
-        <div className="container max-w-3xl px-4 py-16 relative z-10">
+        <div className="container relative z-10 max-w-3xl px-4 py-16">
           <section className="surface-panel reveal-up p-8 md:p-10">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">Session</p>
+            <p className="brand-kicker">Session</p>
             <h1 className="mt-3 font-display text-3xl md:text-4xl font-semibold tracking-tight">Loading Support Hub</h1>
             <p className="mt-3 text-[15px] leading-7 text-muted-foreground">
               Verifying your account and preparing ticket operations workspace.
@@ -3785,11 +4030,11 @@ export default function Hub() {
   if (!authorized) {
     return (
       <main className="relative min-h-screen overflow-hidden bg-background">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(86,130,3,0.15),transparent_38%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(132,202,65,0.22),transparent_38%)]" />
         <div className="pointer-events-none absolute inset-0 ambient-grid opacity-[0.14]" />
 
-        <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-[#568203]/24 via-[#568203]/8 to-transparent backdrop-blur-sm">
-          <div className="container max-w-[2200px] py-4 px-4">
+        <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-primary/28 via-primary/10 to-transparent backdrop-blur-sm">
+          <div className="container max-w-[2200px] px-4 py-4">
             <Link to="/" className="inline-flex items-center gap-3">
               <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
               <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
@@ -3797,9 +4042,9 @@ export default function Hub() {
           </div>
         </div>
 
-        <div className="container max-w-3xl px-4 py-12 relative z-10">
+        <div className="container relative z-10 max-w-3xl px-4 py-12">
           <section className="surface-panel reveal-up p-7 md:p-9">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">Internal Access</p>
+            <p className="brand-kicker">Internal Access</p>
             <h1 className="mt-3 font-display text-3xl md:text-4xl font-semibold tracking-tight">
               {recoveryMode ? "Recover Access" : "Support Hub Sign In"}
             </h1>
@@ -3875,79 +4120,69 @@ export default function Hub() {
   const activeSummary = activeTicket ? summaryMap[activeTicket.ticket_id] || null : null;
 
   return (
-    <main className="min-h-screen bg-background relative overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(86,130,3,0.12),transparent_42%)]" />
+    <main className="relative min-h-screen overflow-hidden bg-background">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(132,202,65,0.2),transparent_42%)]" />
       <div className="pointer-events-none absolute inset-0 ambient-grid opacity-[0.14]" />
-      <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-[#568203]/16 via-[#568203]/6 to-transparent backdrop-blur-sm">
-        <div className="container max-w-[2200px] py-3 px-4 flex items-center justify-between gap-3">
+      <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-primary/24 via-primary/8 to-transparent backdrop-blur-sm">
+        <div className="container flex max-w-[2200px] items-center justify-between gap-3 px-4 py-3">
           <Link to="/" className="inline-flex items-center gap-3">
             <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
             <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
           </Link>
           <div className="flex items-center gap-2">
+            <span className="hidden text-[12px] text-muted-foreground lg:inline">{userEmail}</span>
             <Button size="sm" variant="outline" className="gap-2" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
               <Menu className="h-4 w-4" />
               <span className="hidden sm:inline">Menu</span>
             </Button>
-            <span className="hidden md:inline text-[12px] text-muted-foreground">{userEmail}</span>
           </div>
         </div>
       </div>
 
-      <div className="container max-w-[2200px] py-6 px-4 relative z-10">
+      <div className="container relative z-10 max-w-[2200px] px-4 py-6">
         <section className="space-y-5">
-          <section className="surface-panel reveal-up p-6 md:p-7">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Operations Console</p>
-                <h1 className="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight">Support Hub</h1>
-                <p className="text-[15px] md:text-[16px] leading-6 text-muted-foreground">
-                  {allTicketCount} cached tickets across Omni One and Omni Arena.
-                </p>
-                <p className="text-[12px] text-muted-foreground">
-                  {lastSync?.finishedAt
-                    ? `Last sync: ${new Date(lastSync.finishedAt).toLocaleString()} • Status: ${lastSync.status} • Updated: ${lastSync.ticketsUpserted}`
-                    : "Last sync: not available yet"}
-                </p>
-                {syncMessage ? <p className="text-[12px] text-muted-foreground">{syncMessage}</p> : null}
+          <section className="surface-panel reveal-up relative overflow-hidden p-6 md:p-7">
+            <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-primary/18 blur-3xl" />
+            <div className="relative space-y-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1.5">
+                  <p className="brand-kicker">Operations Console</p>
+                  <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight md:text-4xl">Support Hub</h1>
+                  <p className="text-[15px] leading-6 text-muted-foreground md:text-[16px]">
+                    {allTicketCount} cached tickets across Omni One and Omni Arena.
+                  </p>
+                  <p className="text-[12px] text-muted-foreground">
+                    {lastSync?.finishedAt
+                      ? `Last sync: ${new Date(lastSync.finishedAt).toLocaleString()} • Status: ${lastSync.status} • Updated: ${lastSync.ticketsUpserted}`
+                      : "Last sync: not available yet"}
+                  </p>
+                  {syncMessage ? <p className="text-[12px] text-muted-foreground">{syncMessage}</p> : null}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button onClick={handleSyncNow} disabled={syncLoading}>
+                    {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    {syncLoading ? "Syncing..." : "Sync Zendesk"}
+                  </Button>
+                  <Button variant="outline" onClick={handleBackfillOneYear} disabled={syncLoading}>
+                    {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    {syncLoading ? "Running..." : "Backfill 1 Year"}
+                  </Button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={handleSyncNow} disabled={syncLoading}>
-                  {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  {syncLoading ? "Syncing..." : "Sync Zendesk"}
-                </Button>
-                <Button variant="outline" onClick={handleBackfillOneYear} disabled={syncLoading}>
-                  {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  {syncLoading ? "Running..." : "Backfill 1 Year"}
-                </Button>
-                {inTicketRoute ? (
-                  <>
-                    <Button variant="outline" onClick={() => navigate("/hub/digests")}>Open Digests</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/documents")}>Open Documents</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/reports")}>Open Reports</Button>
-                  </>
-                ) : null}
-                {inDigestRoute ? (
-                  <>
-                    <Button variant="outline" onClick={() => navigate("/hub")}>Open Tickets</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/documents")}>Open Documents</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/reports")}>Open Reports</Button>
-                  </>
-                ) : null}
-                {inDocumentsRoute ? (
-                  <>
-                    <Button variant="outline" onClick={() => navigate("/hub")}>Open Tickets</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/digests")}>Open Digests</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/reports")}>Open Reports</Button>
-                  </>
-                ) : null}
-                {inReportsRoute ? (
-                  <>
-                    <Button variant="outline" onClick={() => navigate("/hub")}>Open Tickets</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/digests")}>Open Digests</Button>
-                    <Button variant="outline" onClick={() => navigate("/hub/documents")}>Open Documents</Button>
-                  </>
-                ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                {routeTabs.map((tab) => (
+                  <Button
+                    key={tab.path}
+                    size="sm"
+                    variant={tab.active ? "secondary" : "ghost"}
+                    className={tab.active ? "border-primary/40 bg-primary/12 text-primary" : ""}
+                    onClick={() => navigate(tab.path)}
+                  >
+                    {tab.label}
+                  </Button>
+                ))}
               </div>
             </div>
           </section>
@@ -4013,15 +4248,21 @@ export default function Hub() {
               onRefreshReceivedRollup={refreshReceivedRollup}
               onCopySummary={handleCopyWeeklySummary}
               onCopyReceivedRollupSummary={handleCopyReceivedRollupSummary}
+              dispatchPreview={weeklyDispatchPreview}
+              dispatchLoading={weeklyDispatchLoading}
+              onPreviewDispatch={handlePreviewWeeklyDispatch}
+              onSendDispatch={handleSendWeeklyDispatchNow}
+              onClearDispatchPreview={() => setWeeklyDispatchPreview(null)}
               onTrackEvent={(eventName, metadata) => {
                 void trackHubEvent(eventName, metadata ?? {});
               }}
             />
           ) : (
-            <section className="grid gap-5 2xl:grid-cols-2">
-              <section className="space-y-3 surface-panel p-5 md:p-6">
-                <div className="h-8 flex items-center border-b border-border/55 pb-3">
+            <section className="grid gap-5 xl:gap-6 2xl:grid-cols-2">
+              <section className="surface-panel space-y-4 p-5 md:p-6">
+                <div className="flex items-center justify-between border-b border-border/55 pb-3">
                   <img src={omniOneLogo} alt="Omni One" className="h-7 w-auto" />
+                  <span className="brand-chip">{omniOneTickets.length} tickets</span>
                 </div>
                 <TicketTable
                   rows={omniOneTickets}
@@ -4036,9 +4277,10 @@ export default function Hub() {
                 />
               </section>
 
-              <section className="space-y-3 surface-panel p-5 md:p-6">
-                <div className="h-8 flex items-center border-b border-border/55 pb-3">
+              <section className="surface-panel space-y-4 p-5 md:p-6">
+                <div className="flex items-center justify-between border-b border-border/55 pb-3">
                   <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
+                  <span className="brand-chip">{omniArenaTickets.length} tickets</span>
                 </div>
                 <TicketTable
                   rows={omniArenaTickets}
@@ -4053,10 +4295,13 @@ export default function Hub() {
                 />
               </section>
 
-              <section className="space-y-3 surface-panel p-5 md:p-6 2xl:col-span-2">
-                <div className="h-8 flex items-center border-b border-border/55 pb-3">
-                  <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
-                  <span className="ml-2 text-sm text-muted-foreground">Sites</span>
+              <section className="surface-panel space-y-4 p-5 md:p-6 2xl:col-span-2">
+                <div className="flex items-center justify-between border-b border-border/55 pb-3">
+                  <div className="flex items-center gap-2">
+                    <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
+                    <span className="text-sm text-muted-foreground">Sites</span>
+                  </div>
+                  <span className="brand-chip">{sites.length} venues</span>
                 </div>
                 <ArenaSitesTable sites={sites} loading={sitesLoading} error={sitesError} />
               </section>

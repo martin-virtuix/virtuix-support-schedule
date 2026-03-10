@@ -77,6 +77,18 @@ export type SendToSlackResponse = {
   error?: string;
 };
 
+export type WeeklyTicketReportDispatchResponse = {
+  ok: boolean;
+  dry_run?: boolean;
+  week_start_date?: string;
+  reference_date?: string;
+  subject?: string;
+  preview_text?: string;
+  preview_slack?: string;
+  preview_email_html?: string;
+  error?: string;
+};
+
 export type CopilotCitation = {
   source_type: "document" | "ticket";
   title: string;

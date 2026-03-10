@@ -19,25 +19,25 @@ export function WeekCard({ bundle, isCurrentWeek }: WeekCardProps) {
   if (!bundle) {
     return (
       <div className="surface-panel p-6 md:p-7 animate-pulse">
-        <div className="h-6 bg-muted rounded w-24 mb-5" />
-        <div className="h-9 bg-muted rounded w-40 mb-3" />
-        <div className="h-4 bg-muted rounded w-56" />
+        <div className="mb-5 h-6 w-24 rounded-full bg-muted/80" />
+        <div className="mb-3 h-9 w-44 rounded-lg bg-muted/80" />
+        <div className="h-4 w-60 rounded bg-muted/75" />
       </div>
     );
   }
 
   return (
-    <div className="surface-panel p-6 md:p-7 space-y-5">
-      <div className="flex items-start justify-between">
+    <div className="surface-panel space-y-5 p-6 md:p-7">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <StatusPill 
             isOpen={isCurrentWeek ? isOpen : false} 
             label={isCurrentWeek ? undefined : "Preview"} 
           />
-          <h3 className="text-[1.65rem] md:text-3xl font-semibold text-foreground tracking-tight leading-tight">
+          <h3 className="text-[1.9rem] font-semibold leading-tight tracking-tight text-foreground md:text-3xl">
             {isCurrentWeek ? dayLabel[todayKey] : "Next week"}
           </h3>
-          <p className="text-[15px] md:text-[16px] leading-6 text-muted-foreground">
+          <p className="text-[15px] leading-6 text-muted-foreground md:text-[16px]">
             {isCurrentWeek 
               ? formatHours(todayKey, bundle.businessHours)
               : "Schedule loaded from sheet"
@@ -45,27 +45,27 @@ export function WeekCard({ bundle, isCurrentWeek }: WeekCardProps) {
           </p>
         </div>
         {isCurrentWeek && (
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/45 px-3 py-1 text-[13px] md:text-sm text-muted-foreground">
+          <div className="inline-flex w-fit items-center gap-1.5 rounded-full border border-border/75 bg-background/55 px-3 py-1 text-[13px] text-muted-foreground md:text-sm">
             <Clock className="w-4 h-4 text-primary" />
             {currentTime}
           </div>
         )}
       </div>
 
-      <div className="pt-3 border-t border-border/60">
+      <div className="border-t border-border/60 pt-3">
         {isCurrentWeek ? (
           isOpen && peopleToday.length > 0 ? (
-            <p className="text-[15px] md:text-[16px] leading-6">
+            <p className="text-[15px] leading-6 md:text-[16px]">
               <span className="text-muted-foreground">On duty now:</span>{" "}
               <span className="font-semibold text-foreground">{peopleToday.join(", ")}</span>
             </p>
           ) : isOpen ? (
-            <p className="text-[15px] md:text-[16px] leading-6 text-muted-foreground">No one assigned today.</p>
+            <p className="text-[15px] leading-6 text-muted-foreground md:text-[16px]">No one assigned today.</p>
           ) : (
-            <p className="text-[15px] md:text-[16px] leading-6 text-muted-foreground">Outside business hours.</p>
+            <p className="text-[15px] leading-6 text-muted-foreground md:text-[16px]">Outside business hours.</p>
           )
         ) : (
-          <p className="text-[15px] md:text-[16px] leading-6 text-muted-foreground">View the upcoming schedule below.</p>
+          <p className="text-[15px] leading-6 text-muted-foreground md:text-[16px]">View the upcoming schedule below.</p>
         )}
       </div>
     </div>

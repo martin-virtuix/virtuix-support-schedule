@@ -174,8 +174,9 @@ This project now standardizes auth in function code (not gateway JWT enforcement
   - `zendesk-sync`
   - `summarize_ticket`
   - `create_digest`
-  - `send_to_slack`
-  - `copilot_chat`
+- `send_to_slack`
+- `copilot_chat`
+- `weekly_ticket_report_dispatch`
 - Each function validates bearer tokens with shared helper:
   - `supabase/functions/_shared/auth.ts`
   - `supabase/functions/_shared/auth_debug.ts`
@@ -209,6 +210,14 @@ DIGEST_SYSTEM_PROMPT
 
 # Slack delivery
 SLACK_WEBHOOK_URL
+
+# Weekly report email delivery (Resend)
+RESEND_API_KEY
+REPORT_EMAIL_FROM
+REPORT_EMAIL_TO
+# Optional
+REPORT_EMAIL_CC
+REPORT_EMAIL_BCC
 ```
 
 Set or update secrets:
@@ -225,13 +234,39 @@ npx supabase secrets set \
   OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o" \
   SUMMARY_SYSTEM_PROMPT="<optional-summary-system-prompt>" \
   DIGEST_SYSTEM_PROMPT="<optional-digest-system-prompt>" \
-  SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>"
+  SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>" \
+  RESEND_API_KEY="<resend-api-key>" \
+  REPORT_EMAIL_FROM="Virtuix Support <support@yourdomain.com>" \
+  REPORT_EMAIL_TO="ops1@virtuix.com,ops2@virtuix.com" \
+  REPORT_EMAIL_CC="manager@virtuix.com" \
+  REPORT_EMAIL_BCC=""
 ```
 
 Apply schema updates for copilot/digest tables:
 
 ```bash
 npx supabase db push
+```
+
+Deploy function changes:
+
+```bash
+npx supabase functions deploy sync_zendesk send_to_slack weekly_ticket_report_dispatch
+```
+
+Weekly automation:
+- Job name: `weekly-ticket-report-monday-7am-cst`
+- Schedule: every Monday at `13:00 UTC` (equivalent to `7:00 AM CST`)
+- Flow: `sync_zendesk -> weekly report RPCs -> Slack + email dispatch`
+
+Manual dry-run (safe preview, no Slack/email send):
+
+```bash
+curl -i \
+  -X POST "https://ddqacivmenvlidzxxhyv.supabase.co/functions/v1/weekly_ticket_report_dispatch" \
+  -H "Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true}'
 ```
 
 ## Routing

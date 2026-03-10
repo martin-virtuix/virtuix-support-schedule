@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.hub_analytics]
 verify_jwt = false
+
+[functions.weekly_ticket_report_dispatch]
+verify_jwt = false

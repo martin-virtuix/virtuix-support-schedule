@@ -291,7 +291,7 @@ export function CopilotChatDock({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+    <div className="fixed bottom-3 right-3 z-50 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
       {!showPanel && notificationBanner ? (
         <div className="max-w-[250px] rounded-full border border-primary/40 bg-background/95 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur-sm">
           {notificationBanner}
@@ -301,7 +301,7 @@ export function CopilotChatDock({
       {!showPanel ? (
         <Button
           onClick={openPanel}
-          className="chat-dock-fab relative h-14 w-14 rounded-full border border-primary/35 bg-primary/90 p-0 text-primary-foreground shadow-[0_18px_40px_-20px_hsl(var(--primary)/0.95)] transition hover:scale-[1.03] hover:bg-primary"
+          className="chat-dock-fab relative h-14 w-14 rounded-full border border-primary/45 bg-primary/90 p-0 text-primary-foreground shadow-[0_18px_40px_-20px_hsl(var(--primary)/0.95)] transition hover:scale-[1.03] hover:bg-primary"
           aria-label="Open support copilot chat"
         >
           <MessageSquare className="h-6 w-6" />
@@ -314,13 +314,13 @@ export function CopilotChatDock({
       ) : (
         <section
           className={[
-            "chat-dock-shell relative h-[min(74vh,680px)] w-[min(430px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-primary/20 bg-card/95 shadow-[0_28px_80px_-38px_rgba(0,0,0,0.98)] backdrop-blur-md",
+            "chat-dock-shell relative h-[min(78vh,680px)] w-[min(430px,calc(100vw-0.75rem))] overflow-hidden rounded-2xl border border-primary/24 bg-card/95 shadow-[0_28px_80px_-38px_rgba(0,0,0,0.98)] backdrop-blur-md",
             panelState === "opening" ? "chat-dock-enter" : "",
             panelState === "closing" ? "chat-dock-exit pointer-events-none" : "",
           ].join(" ")}
         >
           <div className="pointer-events-none absolute inset-0 rounded-2xl border border-primary/12" />
-          <header className="border-b bg-gradient-to-r from-primary/15 via-card to-card px-4 py-3">
+          <header className="border-b border-border/55 bg-gradient-to-r from-primary/16 via-card to-card px-4 py-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/20">
@@ -342,7 +342,7 @@ export function CopilotChatDock({
             </div>
           </header>
 
-          <div className="border-b bg-background/80 px-3 py-2">
+          <div className="border-b border-border/55 bg-background/80 px-3 py-2">
             <div className="flex gap-2 overflow-x-auto pb-1">
               {orderedSessions.map((session) => (
                 <button
@@ -444,7 +444,7 @@ export function CopilotChatDock({
               <div ref={endRef} />
             </div>
 
-            <div className="space-y-2 border-t bg-background/90 px-3 py-3">
+            <div className="space-y-2 border-t border-border/55 bg-background/90 px-3 py-3">
               <div className="flex flex-wrap gap-2">
                 {QUICK_PROMPTS.map((quickPrompt) => (
                   <Button

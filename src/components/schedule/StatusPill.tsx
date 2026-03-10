@@ -9,16 +9,16 @@ export function StatusPill({ isOpen, label }: StatusPillProps) {
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider",
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.11em]",
         isOpen
-          ? "bg-success/15 text-success"
-          : "bg-destructive/15 text-destructive"
+          ? "border-success/45 bg-success/14 text-emerald-300"
+          : "border-destructive/45 bg-destructive/14 text-red-300",
       )}
     >
       <span
         className={cn(
           "w-2 h-2 rounded-full animate-pulse",
-          isOpen ? "bg-success" : "bg-destructive"
+          isOpen ? "bg-success" : "bg-destructive",
         )}
       />
       {label || (isOpen ? "Open" : "Closed")}
