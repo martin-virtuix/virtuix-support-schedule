@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
 import { CopilotChatDock, type CopilotChatInputMessage } from "@/components/hub/CopilotChatDock";
+import { VideosPane } from "@/components/hub/VideosPane";
 import { getArenaSites, type ArenaSite } from "@/lib/scheduleData";
 import { useToast } from "@/hooks/use-toast";
 import type {
@@ -1045,6 +1046,13 @@ function SideNavigation({
           className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
         >
           Documents
+        </NavLink>
+        <NavLink
+          to="/hub/videos"
+          onClick={onNavigate}
+          className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
+        >
+          Videos
         </NavLink>
         <NavLink
           to="/hub/reports"
@@ -2579,7 +2587,8 @@ export default function Hub() {
   const inDigestRoute = location.pathname === "/hub/digests";
   const inDocumentsRoute = location.pathname === "/hub/documents";
   const inReportsRoute = location.pathname === "/hub/reports";
-  const inTicketRoute = !inDigestRoute && !inDocumentsRoute && !inReportsRoute;
+  const inVideosRoute = location.pathname === "/hub/videos";
+  const inTicketRoute = !inDigestRoute && !inDocumentsRoute && !inReportsRoute && !inVideosRoute;
 
   async function invokeFunctionRobust<T>(name: string, body: Record<string, unknown>): Promise<T> {
     try {
@@ -3992,6 +4001,7 @@ export default function Hub() {
     { label: "Tickets", path: "/hub", active: inTicketRoute },
     { label: "Digests", path: "/hub/digests", active: inDigestRoute },
     { label: "Documents", path: "/hub/documents", active: inDocumentsRoute },
+    { label: "Videos", path: "/hub/videos", active: inVideosRoute },
     { label: "Reports", path: "/hub/reports", active: inReportsRoute },
   ];
 
@@ -4257,6 +4267,8 @@ export default function Hub() {
                 void trackHubEvent(eventName, metadata ?? {});
               }}
             />
+          ) : inVideosRoute ? (
+            <VideosPane />
           ) : (
             <section className="grid gap-5 xl:gap-6 2xl:grid-cols-2">
               <section className="surface-panel space-y-4 p-5 md:p-6">
