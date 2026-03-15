@@ -1,161 +1,213 @@
-# Virtuix Support Schedule + Support Hub
+# Virtuix Support Schedule
 
-A Vite/React app with two experiences:
+Internal support operations app for Virtuix. The project has two main experiences:
 
-- Public schedule page (`/`) for weekly Omni support coverage.
-- Private Support Hub (`/hub`) for Virtuix employees, including Zendesk ticket operations and Arena sites data.
+- `/` is a public-facing weekly schedule for Omni One and Omni Arena support coverage.
+- `/hub` is the authenticated internal workspace for ticket operations, documents, videos, reporting, and AI-assisted support workflows.
 
-## Current Scope
+## Current Product Scope
 
-### Public (`/`)
-- Displays current and next week support schedules.
-- Uses Google Sheets CSV as source of truth.
-- Includes login CTA to the private Hub.
+### Public schedule
 
-### Private Hub (`/hub`)
-- Supabase Auth sign-in flow (email OTP), restricted to `@virtuix.com` users in app logic and DB RLS read policies.
-- Two Zendesk-backed ticket tables:
-  - Omni One tickets
-  - Omni Arena tickets
-- Documents workspace (`/hub/documents`) for PDF knowledge files stored in Supabase Storage, split by:
-  - `omni_one` folder
-  - `omni_arena` folder
-- Features:
-  - Status filters (`all`, `open`, `pending`, `new`)
-  - Status badge colors (Zendesk-like)
-  - Requester column
-  - Ticket links to Zendesk agent view
-  - Scrollable tables with sticky headers
-- Arena Sites table with filters/search/sort and sticky-header scrolling.
-- `Sync now` button triggers Zendesk sync function and refreshes Hub data.
+- Current week and next week coverage pulled from published Google Sheets CSV feeds.
+- Daily summary cards for current time, business hours, on-duty coverage, and staffed-day count.
+- Responsive weekly schedule views for mobile and desktop.
+- Direct path into the internal Support Hub.
 
-## Tech Stack
+### Support Hub
 
-- React 18 + TypeScript
+Access is limited to `@virtuix.com` accounts in the app flow.
+
+- Shared workspace shell with desktop sidebar, mobile sheet navigation, and route-aware overview metrics.
+- Ticket operations
+  - Separate Omni One and Omni Arena queue views backed by `ticket_cache`.
+  - Search, status filters, bulk selection, and digest generation from the active queue.
+  - Ticket detail drawer with AI summary refresh, copy action, Slack send, and Zendesk link-out.
+  - Manual Zendesk sync and backfill controls.
+- Digests
+  - Review saved digests from the `digests` table.
+  - Copy markdown or table output.
+  - Send digests to Slack.
+- Documents
+  - Browse PDF documents from Supabase Storage.
+  - Logo-first brand filters and top-level folder scoping.
+  - Signed URL preview and download.
+  - Semantic search over indexed document chunks.
+- Videos
+  - Curated support video library from `src/lib/hubVideos.ts`.
+  - Mixed YouTube and Dropbox playback/open support.
+  - Compact logo-first brand filters and now-playing layout.
+- Reports
+  - Weekly ticket report view from Supabase RPCs.
+  - Monthly / quarterly / yearly received-ticket rollups.
+  - Copyable high-impact report summary.
+  - Weekly dispatch preview and send workflow for Slack + email.
+- Copilot
+  - Docked chat experience for queue triage and operational guidance.
+
+## Stack
+
+- React 18
+- TypeScript
 - Vite 5
-- Tailwind CSS + shadcn/Radix UI
-- Supabase (Postgres, Auth, Edge Functions)
+- Tailwind CSS + shadcn/ui + Radix UI
+- Supabase
+  - Auth
+  - Postgres
+  - Storage
+  - Edge Functions
+- OpenAI for ticket summaries, digests, and copilot responses
 
 ## Data Sources
 
-- Schedule and sites CSVs: Google Sheets published CSV URLs (see `src/lib/scheduleData.ts`).
-- Hub tickets: `public.zendesk_tickets` (synced from Zendesk API via edge function).
+- Public schedule and Arena site status: Google Sheets CSV feeds in [src/lib/scheduleData.ts](/home/martin-homelab/project-support/virtuix-support-schedule/src/lib/scheduleData.ts)
+- Hub tickets: `ticket_cache`
+- Ticket summaries: `ticket_summaries`
+- Digests: `digests`
+- Sync metadata: `zendesk_sync_runs`
+- Support documents: Supabase Storage bucket `support-documents` by default
 
-## Zendesk Sync Pipeline
+## Routes
 
-### Function
-- Edge function: `supabase/functions/zendesk-sync/index.ts`
-- Pulls Zendesk incremental tickets API.
-- Upserts into `public.zendesk_tickets`.
-- Writes run metadata/errors to `public.zendesk_sync_runs`.
+- `/` public support coverage schedule
+- `/hub` ticket operations
+- `/hub/digests` digest history
+- `/hub/documents` support PDF library
+- `/hub/videos` support video library
+- `/hub/reports` weekly reporting and dispatch tools
 
-### Scheduling
-- Automatic cron job every 5 minutes (DB migration-managed).
-- Manual sync available via Hub `Sync now` button.
+## Local Development
 
-### Reliability
-- Retry/backoff on Zendesk `429` and `5xx`.
-- Overlap protection:
-  - DB constraint allows only one `running` sync at a time.
-  - Function returns `202 skipped` if a run is already in progress.
+### Requirements
 
-## Supabase Project
+- Node.js 18+
+- npm
+- Supabase CLI for migrations and function deployment
 
-Configured project ref:
-
-- `ddqacivmenvlidzxxhyv` (see `supabase/config.toml`)
-
-## Required Environment Variables
-
-### Frontend (`.env`)
+### Install
 
 ```bash
-VITE_SUPABASE_PROJECT_ID="ddqacivmenvlidzxxhyv"
+npm install
+```
+
+### Run the app
+
+```bash
+npm run dev
+```
+
+Vite is configured for `http://127.0.0.1:8080`.
+
+### Useful scripts
+
+```bash
+npm run dev
+npm run build
+npm run preview
+npm run lint
+npm run test
+npm run sync:zendesk
+npm run sync:zendesk:omni-one
+npm run sync:zendesk:omni-arena
+```
+
+`npm run test` currently only exercises the placeholder Vitest example, so automated coverage is minimal.
+
+## Frontend Environment
+
+Set these in `.env` for the Vite app:
+
+```bash
 VITE_SUPABASE_URL="https://ddqacivmenvlidzxxhyv.supabase.co"
 VITE_SUPABASE_PUBLISHABLE_KEY="<supabase-anon-key>"
 ```
 
-Optional (defaults to `support-documents`):
+Optional:
 
 ```bash
 VITE_SUPPORT_DOCUMENTS_BUCKET="support-documents"
 ```
 
-Optional (only for Zendesk link fallback in UI):
+For the CLI sync scripts in `package.json`, provide one of:
 
 ```bash
-VITE_ZENDESK_SUBDOMAIN="<your-subdomain>"
+SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
+SUPABASE_FUNCTION_TOKEN="<jwt-for-function-testing>"
 ```
 
-Optional for CLI edge-function probes (`npm run sync:zendesk*`):
+## Supabase Functions In This Repo
+
+Current function entrypoints:
+
+- [supabase/functions/sync_zendesk/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/sync_zendesk/index.ts)
+- [supabase/functions/zendesk-sync/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/zendesk-sync/index.ts)
+- [supabase/functions/summarize_ticket/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/summarize_ticket/index.ts)
+- [supabase/functions/create_digest/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/create_digest/index.ts)
+- [supabase/functions/send_to_slack/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/send_to_slack/index.ts)
+- [supabase/functions/copilot_chat/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/copilot_chat/index.ts)
+- [supabase/functions/semantic_search_documents/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/semantic_search_documents/index.ts)
+- [supabase/functions/hub_analytics/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/hub_analytics/index.ts)
+- [supabase/functions/weekly_ticket_report_dispatch/index.ts](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/functions/weekly_ticket_report_dispatch/index.ts)
+
+Function JWT verification is disabled in [supabase/config.toml](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/config.toml), and auth is handled inside the function code with the shared auth helper.
+
+## Function Secrets
+
+These are the important Supabase function secrets used by the current codebase.
+
+### Shared auth / Supabase access
 
 ```bash
-# Preferred for operator scripts
-SUPABASE_SERVICE_ROLE_KEY="<service-role-jwt>"
-
-# Alternative override when testing with a user JWT
-SUPABASE_FUNCTION_TOKEN="<access-token-jwt>"
+SUPABASE_URL
+SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
 ```
 
-### Supabase Edge Function Secrets
-
-Set in Supabase (not in `.env`):
+### Zendesk sync
 
 ```bash
 ZENDESK_SUBDOMAIN
 ZENDESK_EMAIL
 ZENDESK_API_TOKEN
-ZENDESK_OMNI_ARENA_BRAND_ID=360007126832
-ZENDESK_OMNI_ONE_BRAND_ID=26871345286541
+ZENDESK_OMNI_ARENA_BRAND_ID
+ZENDESK_OMNI_ONE_BRAND_ID
 ```
 
-## Local Development
-
-### Prerequisites
-- Node.js 18+
-- npm
-- Supabase CLI (for migrations/functions workflow)
-
-### Install + Run
+### OpenAI-backed workflows
 
 ```bash
-npm install
-npm run dev
+OPENAI_API_KEY
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL_FALLBACKS=gpt-4o-mini,gpt-4.1,gpt-4o
 ```
 
-By default this project is configured to run Vite on:
-
-- `http://127.0.0.1:8080`
-
-If port `8080` is in use, Vite auto-selects the next available port.
-
-## Scripts
+Optional prompt overrides:
 
 ```bash
-npm run dev        # Start dev server
-npm run build      # Production build
-npm run test       # Run tests
-npm run lint       # Lint code
-npm run preview    # Preview built app
+SUMMARY_SYSTEM_PROMPT
+DIGEST_SYSTEM_PROMPT
 ```
 
-## Supabase Workflow
+### Slack / weekly dispatch
 
-### Apply migrations
+```bash
+SLACK_WEBHOOK_URL
+RESEND_API_KEY
+REPORT_EMAIL_FROM
+REPORT_EMAIL_TO
+REPORT_EMAIL_CC
+REPORT_EMAIL_BCC
+```
+
+## Common Supabase Workflow
+
+### Push schema changes
 
 ```bash
 npx supabase db push
 ```
 
-### Deploy function
-
-```bash
-npx supabase functions deploy zendesk-sync
-```
-
-### New Edge Functions (Copilot + Digest)
-
-Deploy the new functions:
+### Deploy functions
 
 ```bash
 npx supabase functions deploy sync_zendesk
@@ -163,143 +215,57 @@ npx supabase functions deploy summarize_ticket
 npx supabase functions deploy create_digest
 npx supabase functions deploy send_to_slack
 npx supabase functions deploy copilot_chat
+npx supabase functions deploy semantic_search_documents
+npx supabase functions deploy hub_analytics
+npx supabase functions deploy weekly_ticket_report_dispatch
 ```
 
-### Edge Function Auth Baseline (prevents `Invalid JWT` gateway failures)
+## Document Semantic Search Indexing
 
-This project now standardizes auth in function code (not gateway JWT enforcement):
+The document indexer lives at [scripts/index_support_documents.py](/home/martin-homelab/project-support/virtuix-support-schedule/scripts/index_support_documents.py).
 
-- `supabase/config.toml` sets `verify_jwt = false` for:
-  - `sync_zendesk`
-  - `zendesk-sync`
-  - `summarize_ticket`
-  - `create_digest`
-- `send_to_slack`
-- `copilot_chat`
-- `weekly_ticket_report_dispatch`
-- Each function validates bearer tokens with shared helper:
-  - `supabase/functions/_shared/auth.ts`
-  - `supabase/functions/_shared/auth_debug.ts`
-- Frontend calls functions with the current user access token from session (`Authorization: Bearer <access_token>`).
+It targets:
 
-Rollout checklist for any new function:
+- `support-documents/omni_one/knowledge_base/**`
+- `support-documents/omni_arena/knowledge_base/**`
 
-1. Add `[functions.<name>] verify_jwt = false` in `supabase/config.toml`.
-2. In the function, call `authorizeVirtuixRequest(req, { functionName: "<name>" })` (or `allowServiceRole: true` only where needed).
-3. Return `HttpError.status` directly (never wrap auth failures in 200).
-4. Deploy function after changes.
-5. Validate with one unauthenticated request (expect 401 from function JSON) and one authenticated request (expect 200).
-
-Required function secrets:
+Python requirements:
 
 ```bash
-# Zendesk sync
-ZENDESK_SUBDOMAIN
-ZENDESK_EMAIL
-ZENDESK_API_TOKEN
-ZENDESK_OMNI_ARENA_BRAND_ID
-ZENDESK_OMNI_ONE_BRAND_ID
+python3 -m pip install requests pypdf
+```
 
-# AI ticket summarization + digest generation
+Run it with:
+
+```bash
+python3 scripts/index_support_documents.py
+```
+
+Required environment for the script:
+
+```bash
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
 OPENAI_API_KEY
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_MODEL_FALLBACKS=gpt-4o-mini,gpt-4.1,gpt-4o
-# Optional prompt overrides (defaults are built-in if omitted)
-SUMMARY_SYSTEM_PROMPT
-DIGEST_SYSTEM_PROMPT
-
-# Slack delivery
-SLACK_WEBHOOK_URL
-
-# Weekly report email delivery (Resend)
-RESEND_API_KEY
-REPORT_EMAIL_FROM
-REPORT_EMAIL_TO
-# Optional
-REPORT_EMAIL_CC
-REPORT_EMAIL_BCC
 ```
 
-Set or update secrets:
+`VITE_SUPABASE_URL` also works as a fallback for the script.
 
-```bash
-npx supabase secrets set \
-  ZENDESK_SUBDOMAIN="<subdomain>" \
-  ZENDESK_EMAIL="<email>" \
-  ZENDESK_API_TOKEN="<token>" \
-  ZENDESK_OMNI_ARENA_BRAND_ID="360007126832" \
-  ZENDESK_OMNI_ONE_BRAND_ID="26871345286541" \
-  OPENAI_API_KEY="<openai-key>" \
-  OPENAI_MODEL="gpt-4.1-mini" \
-  OPENAI_MODEL_FALLBACKS="gpt-4o-mini,gpt-4.1,gpt-4o" \
-  SUMMARY_SYSTEM_PROMPT="<optional-summary-system-prompt>" \
-  DIGEST_SYSTEM_PROMPT="<optional-digest-system-prompt>" \
-  SLACK_WEBHOOK_URL="<slack-incoming-webhook-url>" \
-  RESEND_API_KEY="<resend-api-key>" \
-  REPORT_EMAIL_FROM="Virtuix Support <support@yourdomain.com>" \
-  REPORT_EMAIL_TO="ops1@virtuix.com,ops2@virtuix.com" \
-  REPORT_EMAIL_CC="manager@virtuix.com" \
-  REPORT_EMAIL_BCC=""
-```
+## Project Structure
 
-Apply schema updates for copilot/digest tables:
+- [src/pages/Index.tsx](/home/martin-homelab/project-support/virtuix-support-schedule/src/pages/Index.tsx) public schedule page
+- [src/pages/Hub.tsx](/home/martin-homelab/project-support/virtuix-support-schedule/src/pages/Hub.tsx) authenticated support workspace
+- [src/components/schedule/ScheduleTable.tsx](/home/martin-homelab/project-support/virtuix-support-schedule/src/components/schedule/ScheduleTable.tsx) weekly schedule display
+- [src/components/schedule/ArenaSitesTable.tsx](/home/martin-homelab/project-support/virtuix-support-schedule/src/components/schedule/ArenaSitesTable.tsx) site coverage status table
+- [src/components/hub/VideosPane.tsx](/home/martin-homelab/project-support/virtuix-support-schedule/src/components/hub/VideosPane.tsx) hub video UI
+- [src/components/hub/CopilotChatDock.tsx](/home/martin-homelab/project-support/virtuix-support-schedule/src/components/hub/CopilotChatDock.tsx) docked copilot UI
+- [src/lib/scheduleData.ts](/home/martin-homelab/project-support/virtuix-support-schedule/src/lib/scheduleData.ts) public schedule + site data loading
+- [src/lib/hubVideos.ts](/home/martin-homelab/project-support/virtuix-support-schedule/src/lib/hubVideos.ts) video library source data
+- [supabase/migrations](/home/martin-homelab/project-support/virtuix-support-schedule/supabase/migrations) schema and cron history
 
-```bash
-npx supabase db push
-```
+## Notes
 
-Deploy function changes:
-
-```bash
-npx supabase functions deploy sync_zendesk send_to_slack weekly_ticket_report_dispatch
-```
-
-Weekly automation:
-- Job name: `weekly-ticket-report-monday-7am-cst`
-- Schedule: every Monday at `13:00 UTC` (equivalent to `7:00 AM CST`)
-- Flow: `sync_zendesk -> weekly report RPCs -> Slack + email dispatch`
-
-Manual dry-run (safe preview, no Slack/email send):
-
-```bash
-curl -i \
-  -X POST "https://ddqacivmenvlidzxxhyv.supabase.co/functions/v1/weekly_ticket_report_dispatch" \
-  -H "Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"dry_run":true}'
-```
-
-## Routing
-
-- `/` → public schedule page
-- `/hub` → private support hub (auth required)
-
-## Project Structure (key files)
-
-- `src/pages/Index.tsx` — public schedule UI
-- `src/pages/Hub.tsx` — private Hub UI + sync action
-- `src/components/schedule/ScheduleTable.tsx` — schedule table
-- `src/components/schedule/ArenaSitesTable.tsx` — Arena sites table
-- `src/lib/scheduleData.ts` — CSV parsing/loading
-- `src/integrations/supabase/client.ts` — frontend Supabase client
-- `supabase/migrations/*` — DB schema, RLS, cron, protections
-- `supabase/functions/zendesk-sync/index.ts` — Zendesk ingest function
-
-## Troubleshooting
-
-### `npm run dev` fails with `EPERM ... 8080`
-- Usually environment permission/port issue.
-- Ensure no conflicting process is bound to `8080`, or let Vite use next port.
-
-### `Failed to resolve import "papaparse"`
-- Run `npm install` in repo root.
-
-### Sync error in Hub
-- Check latest run logs:
-
-```sql
-select started_at, finished_at, status, tickets_fetched, tickets_upserted, error_message
-from public.zendesk_sync_runs
-order by started_at desc
-limit 20;
-```
+- The repo still contains both `sync_zendesk` and legacy `zendesk-sync` functions.
+- Hub routes are wrapped in a pane error boundary so route-specific render failures surface inline instead of blanking the UI.
+- The frontend uses the generated Supabase client in [src/integrations/supabase/client.ts](/home/martin-homelab/project-support/virtuix-support-schedule/src/integrations/supabase/client.ts).
+- The Vite server configuration is in [vite.config.ts](/home/martin-homelab/project-support/virtuix-support-schedule/vite.config.ts).

@@ -783,3 +783,68 @@ Modified (major):
 - Committed and pushed to `main`:
   - commit `c04f84c`
   - message: `Add /hub/videos library with YouTube and Dropbox support`
+
+### Iteration 26) Hub and public UI refinement pass
+- Reworked `/` into a cleaner public support schedule dashboard:
+  - clearer hierarchy for current vs next week
+  - summary cards for live schedule context
+  - reduced-copy hero treatment
+- Reworked `/hub` into a route-aware workspace shell:
+  - persistent desktop sidebar
+  - mobile sheet navigation
+  - route-specific overview metrics
+  - stronger hierarchy for ticket operations, documents, videos, and reports
+- Rewrote `README.md` to match the actual current product:
+  - real routes
+  - current Supabase functions
+  - active environment variables
+  - document indexing workflow
+
+### Iteration 27) Documents route debugging and hardening
+- Investigated `/hub/documents` blank-screen failure.
+- Added route-level pane error boundary in `src/pages/Hub.tsx` so pane crashes render inline instead of collapsing the UI to background-only.
+- Fixed document-path consistency across the documents flow:
+  - normalized storage paths at document collection time
+  - normalized paths before preview signed URL creation
+  - normalized paths before selection and download
+- Removed route-only `flatMap` usage in the Documents pane aggregation path to reduce browser/runtime compatibility risk.
+- Fixed a render-time `ReferenceError` in `DocumentsPane`:
+  - replaced invalid `documentsSemanticResults` reference with the actual `semanticResults` prop
+
+Validation:
+- `npm run build` passed.
+- `npx tsc --noEmit` passed.
+
+### Iteration 28) Redundancy-reduction pass for brand UI
+- Removed repeated brand wording from logo bubbles where the logo already provided the distinction.
+- Updated Documents brand filter buttons:
+  - logo-only treatment
+  - counts preserved
+  - accessible labels/tooltips retained
+- Simplified shared video brand pills in `src/components/hub/VideosPane.tsx`:
+  - logo-only treatment across cards, now-playing, and up-next states
+- Reduced repeated brand copy in nearby headings/subtitles:
+  - ticket queue subtitles changed to neutral `Zendesk queue snapshot`
+  - documents helper copy tightened
+  - video library and report helper copy simplified
+  - public schedule hero title shortened to `Support Coverage Calendar`
+
+Validation:
+- `npm run build` passed.
+- `npx tsc --noEmit` passed.
+
+### Iteration 29) Documentation sync
+- Updated `README.md` again to reflect:
+  - route-aware Hub shell
+  - current logo-first document/video filters
+  - mixed YouTube/Dropbox video support
+  - inline pane error handling note
+- Added this continuation summary to `previous-session.md` for handoff continuity.
+
+### Iteration 30) Public schedule overview-card spacing pass
+- Adjusted the public `/` hero layout so the four overview cards are no longer constrained to a narrow side column.
+- Moved the cards into a full-width desktop grid under the hero copy.
+- Increased card padding and minimum height so long values like on-duty coverage are less likely to wrap awkwardly.
+
+Validation:
+- `npm run build` passed.

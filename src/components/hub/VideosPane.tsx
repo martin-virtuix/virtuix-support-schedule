@@ -46,42 +46,38 @@ function videoMatchesQuery(video: HubVideoEntry, rawQuery: string): boolean {
 function BrandPill({
   brand,
   compact = false,
-  showLabel = true,
 }: {
   brand: HubVideoBrand;
   compact?: boolean;
-  showLabel?: boolean;
 }) {
-  const compactLogoOnly = compact && !showLabel;
-  const compactLogoOnlyShellClass =
-    brand === "omni_arena" ? "h-6 min-w-[102px]" : "h-6 min-w-[78px]";
-  const logoClassName = compactLogoOnly
+  const shellClass = compact
+    ? brand === "omni_arena"
+      ? "h-6 min-w-[72px] px-2"
+      : "h-6 min-w-[56px] px-2"
+    : brand === "omni_arena"
+      ? "h-8 min-w-[88px] px-2.5"
+      : "h-8 min-w-[68px] px-2.5";
+  const logoClassName = compact
     ? brand === "omni_arena"
       ? "h-[14px] w-auto shrink-0 object-contain"
       : "h-[16px] w-auto shrink-0 object-contain"
-    : compact
-      ? "h-3.5 w-auto"
-      : BRAND_META[brand].logoClassName;
+    : BRAND_META[brand].logoClassName;
 
   return (
     <span
       className={[
-        "inline-flex items-center rounded-full border border-border/70 bg-background/60",
-        compact ? "px-2 py-0.5" : "px-2.5 py-1",
-        showLabel ? (compact ? "gap-1.5" : "gap-2") : "",
-        compactLogoOnly ? `justify-center ${compactLogoOnlyShellClass}` : "",
+        "inline-flex items-center justify-center rounded-full border border-border/70 bg-background/60",
+        compact ? "py-0.5" : "py-1",
+        shellClass,
       ].join(" ")}
+      aria-label={BRAND_META[brand].label}
+      title={BRAND_META[brand].label}
     >
       <img
         src={BRAND_META[brand].logo}
         alt={BRAND_META[brand].label}
         className={logoClassName}
       />
-      {showLabel ? (
-        <span className={compact ? "text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" : "text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"}>
-          {BRAND_META[brand].label}
-        </span>
-      ) : null}
     </span>
   );
 }
@@ -139,10 +135,10 @@ function VideoCard({
         </div>
       </button>
       <div className="mt-3 space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <p className="text-[13px] font-semibold leading-5 text-foreground/95 md:text-[14px]">{video.title}</p>
-          <BrandPill brand={video.brand} compact showLabel={false} />
-        </div>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-[13px] font-semibold leading-5 text-foreground/95 md:text-[14px]">{video.title}</p>
+            <BrandPill brand={video.brand} compact />
+          </div>
         {video.description ? (
           <p className="text-[12px] leading-5 text-muted-foreground">{video.description}</p>
         ) : null}
@@ -339,8 +335,7 @@ export function VideosPane() {
               <p className="brand-kicker">Knowledge Library</p>
               <h2 className="font-display text-xl font-semibold tracking-tight md:text-2xl">Video Training Hub</h2>
               <p className="max-w-3xl text-[14px] leading-6 text-muted-foreground md:text-[15px]">
-                Centralized YouTube walkthroughs and support playbooks for Omni One, Omni Arena, and internal
-                operations.
+                Centralized walkthroughs and support playbooks for product and internal operations.
               </p>
             </div>
 

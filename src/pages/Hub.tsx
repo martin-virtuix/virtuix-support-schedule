@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { CalendarDays, Copy, Download, ExternalLink, FileText, Loader2, Menu, RefreshCw, Search, Send, Sparkles } from "lucide-react";
@@ -11,6 +11,7 @@ import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
 import { CopilotChatDock, type CopilotChatInputMessage } from "@/components/hub/CopilotChatDock";
 import { VideosPane } from "@/components/hub/VideosPane";
 import { getArenaSites, type ArenaSite } from "@/lib/scheduleData";
+import { getHubVideoLibraryEntries } from "@/lib/hubVideos";
 import { useToast } from "@/hooks/use-toast";
 import type {
   CopilotCitation,
@@ -96,6 +97,27 @@ type SupportDocument = {
   sizeBytes: number | null;
 };
 
+type HubViewKey = "tickets" | "digests" | "documents" | "videos" | "reports";
+
+type HubRouteTab = {
+  key: HubViewKey;
+  label: string;
+  path: string;
+  active: boolean;
+  description: string;
+};
+
+type WorkspaceMetric = {
+  label: string;
+  value: string;
+  detail: string;
+  accent?: boolean;
+};
+
+type PaneErrorBoundaryState = {
+  error: Error | null;
+};
+
 const ACTIVE_TICKET_STATUSES = new Set(["new", "open", "pending"]);
 const REPORT_BACKLOG_STATUSES = new Set(["open", "pending"]);
 
@@ -138,6 +160,20 @@ function getOpenPendingStatusCounts(rows: Ticket[]): { open: number; pending: nu
     ...counts,
     total: counts.open + counts.pending,
   };
+}
+
+function getTicketStatusCounts(rows: Ticket[]): { open: number; pending: number; new: number; active: number } {
+  return rows.reduce(
+    (accumulator, ticket) => {
+      const normalizedStatus = ticket.status.toLowerCase();
+      if (normalizedStatus === "open") accumulator.open += 1;
+      if (normalizedStatus === "pending") accumulator.pending += 1;
+      if (normalizedStatus === "new") accumulator.new += 1;
+      if (ACTIVE_TICKET_STATUSES.has(normalizedStatus)) accumulator.active += 1;
+      return accumulator;
+    },
+    { open: 0, pending: 0, new: 0, active: 0 },
+  );
 }
 
 function toTopCounts(values: Array<string | null | undefined>, limit = 3): ReportCountEntry[] {
@@ -410,6 +446,14 @@ function getFirstDocumentPath(
     return byFolder[0].path;
   }
   return (documentsByBrand[brand] || [])[0]?.path || null;
+}
+
+function flattenDocumentsByBrand(documentsByBrand: Record<DocumentBrand, SupportDocument[]>): SupportDocument[] {
+  return SUPPORT_DOCUMENTS_BRANDS.reduce<SupportDocument[]>((allDocuments, brand) => {
+    const docs = documentsByBrand[brand] || [];
+    docs.forEach((document) => allDocuments.push(document));
+    return allDocuments;
+  }, []);
 }
 
 function statusPillClasses(status: string): string {
@@ -728,63 +772,119 @@ function formatTicketTableForClipboard(rows: Array<Record<string, unknown>>): st
   return lines.join("\n");
 }
 
+function WorkspaceMetricCard({ label, value, detail, accent = false }: WorkspaceMetric) {
+  return (
+    <article
+      className={[
+        "rounded-2xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_-28px_hsl(var(--primary)/0.88)]",
+        accent
+          ? "border-primary/45 bg-primary/[0.12] hover:border-primary/65"
+          : "border-border/70 bg-background/45 hover:border-primary/45 hover:bg-background/60",
+      ].join(" ")}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-tight md:text-[1.75rem]">{value}</p>
+      <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{detail}</p>
+    </article>
+  );
+}
+
+class PaneErrorBoundary extends React.Component<React.PropsWithChildren, PaneErrorBoundaryState> {
+  constructor(props: React.PropsWithChildren) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): PaneErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Hub pane render error", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <section className="surface-panel p-5 md:p-6">
+          <p className="brand-kicker">Route Error</p>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight">This hub section failed to render.</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Open the browser console for the exact stack trace. The error message is shown below so the route does not fail silently.
+          </p>
+          <pre className="mt-4 overflow-auto rounded-xl border border-border/70 bg-background/45 p-4 text-xs leading-6 text-destructive">
+            {this.state.error.message || "Unknown render error"}
+          </pre>
+        </section>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function SideNavigation({
   userEmail,
   onSignOut,
   onNavigate,
+  routes,
+  allTicketCount,
+  activeBacklogCount,
+  lastSync,
 }: {
   userEmail: string;
   onSignOut: () => void;
   onNavigate: () => void;
+  routes: HubRouteTab[];
+  allTicketCount: number;
+  activeBacklogCount: number;
+  lastSync: SyncSummary | null;
 }) {
   const linkClasses =
-    "rounded-xl border border-transparent px-3.5 py-2.5 text-[14px] font-medium text-muted-foreground transition hover:border-border/75 hover:bg-muted/45 hover:text-foreground";
+    "rounded-xl border border-transparent px-3.5 py-3 text-left transition hover:border-border/75 hover:bg-muted/45";
   const activeClasses = "border-primary/40 bg-primary/12 text-primary";
 
   return (
     <div className="flex h-full flex-col surface-panel p-4">
-      <div className="mb-5 flex items-center gap-2">
-        <img src={virtuixLogoWhite} alt="Virtuix" className="h-6 w-auto" />
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Support Hub</span>
+      <div className="mb-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <img src={virtuixLogoWhite} alt="Virtuix" className="h-6 w-auto" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Support Hub</span>
+        </div>
+
+        <div className="rounded-2xl border border-border/70 bg-background/45 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Workspace Snapshot</p>
+          <p className="mt-2 text-3xl font-semibold tracking-tight">{allTicketCount}</p>
+          <p className="text-[12px] leading-5 text-muted-foreground">Cached tickets across both support brands.</p>
+          <div className="mt-4 space-y-2 text-[12px] leading-5 text-muted-foreground">
+            <p>
+              Active backlog: <span className="font-medium text-foreground">{activeBacklogCount}</span>
+            </p>
+            <p>
+              Last sync:{" "}
+              <span className="font-medium text-foreground">
+                {lastSync?.finishedAt ? formatDateTime(lastSync.finishedAt) : "Not available"}
+              </span>
+            </p>
+          </div>
+        </div>
       </div>
+
       <nav className="flex flex-col gap-2">
-        <NavLink
-          to="/hub"
-          end
-          onClick={onNavigate}
-          className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
-        >
-          Ticket Operations
-        </NavLink>
-        <NavLink
-          to="/hub/digests"
-          onClick={onNavigate}
-          className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
-        >
-          Digests
-        </NavLink>
-        <NavLink
-          to="/hub/documents"
-          onClick={onNavigate}
-          className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
-        >
-          Documents
-        </NavLink>
-        <NavLink
-          to="/hub/videos"
-          onClick={onNavigate}
-          className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
-        >
-          Videos
-        </NavLink>
-        <NavLink
-          to="/hub/reports"
-          onClick={onNavigate}
-          className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : ""}`}
-        >
-          Reports
-        </NavLink>
+        {routes.map((route) => (
+          <NavLink
+            key={route.path}
+            to={route.path}
+            end={route.path === "/hub"}
+            onClick={onNavigate}
+            className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : "text-foreground"}`}
+          >
+            <span className="block text-[14px] font-medium">{route.label}</span>
+            <span className="mt-1 block text-[12px] leading-5 text-muted-foreground">{route.description}</span>
+          </NavLink>
+        ))}
       </nav>
+
       <div className="mt-auto space-y-3 rounded-xl border border-border/65 bg-background/45 p-3">
         <p className="break-all text-[12px] leading-5 text-muted-foreground">{userEmail}</p>
         <Button variant="secondary" className="w-full" onClick={onSignOut}>
@@ -825,10 +925,17 @@ function TicketTable({
     });
   }, [rows, statusFilter, query]);
 
+  const statusCounts = useMemo(() => getTicketStatusCounts(rows), [rows]);
   const visibleIds = filteredRows.map((row) => row.ticket_id);
   const selectedVisibleCount = visibleIds.filter((id) => selectedIds.has(id)).length;
   const selectedTotalCount = selectedIds.size;
   const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const filterOptions: Array<{ key: "all" | "open" | "pending" | "new"; label: string; count: number }> = [
+    { key: "all", label: "All active", count: statusCounts.active },
+    { key: "open", label: "Open", count: statusCounts.open },
+    { key: "pending", label: "Pending", count: statusCounts.pending },
+    { key: "new", label: "New", count: statusCounts.new },
+  ];
 
   async function handleGenerateDigest() {
     if (selectedTotalCount > 0) {
@@ -842,29 +949,41 @@ function TicketTable({
   return (
     <div className="space-y-3">
       <div className="surface-panel-soft flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search subject or requester..."
-            className="h-9 w-full sm:w-[260px]"
-          />
-          {(["all", "open", "pending", "new"] as const).map((status) => (
-            <Button
-              key={status}
-              variant={statusFilter === status ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setStatusFilter(status)}
-              className="capitalize"
-            >
-              {status}
-            </Button>
-          ))}
+        <div className="flex flex-1 flex-col gap-3">
+          <div className="relative max-w-full sm:max-w-[320px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search subject or requester..."
+              className="h-10 w-full pl-9"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {filterOptions.map((filter) => (
+              <Button
+                key={filter.key}
+                variant={statusFilter === filter.key ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setStatusFilter(filter.key)}
+                className="gap-2"
+              >
+                <span className="capitalize">{filter.label}</span>
+                <span className="rounded-full border border-border/70 bg-background/55 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+                  {filter.count}
+                </span>
+              </Button>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            {selectedTotalCount > 0 ? `${selectedTotalCount} selected` : `${filteredRows.length} in view`}
-          </span>
+
+        <div className="flex flex-col items-start gap-2 text-sm lg:items-end">
+          <div className="text-xs text-muted-foreground">
+            {selectedTotalCount > 0 ? `${selectedTotalCount} selected across both queues` : `${filteredRows.length} tickets in view`}
+          </div>
+          <p className="max-w-xs text-[12px] leading-5 text-muted-foreground lg:text-right">
+            Generate a digest from checked tickets, or from the current filtered list when nothing is selected.
+          </p>
           <Button size="sm" onClick={handleGenerateDigest} disabled={loading || generatingDigest || filteredRows.length === 0}>
             {generatingDigest ? (
               <>
@@ -879,6 +998,11 @@ function TicketTable({
             )}
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-border/65 bg-background/35 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+        <span className="font-medium text-foreground">{statusCounts.active}</span> active tickets in this queue. Open{" "}
+        {statusCounts.open}, pending {statusCounts.pending}, new {statusCounts.new}.
       </div>
 
       <div className="space-y-2 lg:hidden">
@@ -1245,10 +1369,13 @@ function DocumentsPane({
   };
 
   const allDocuments = useMemo(
-    () => SUPPORT_DOCUMENTS_BRANDS.flatMap((brand) => documentsByBrand[brand] || []),
+    () => flattenDocumentsByBrand(documentsByBrand),
     [documentsByBrand],
   );
-  const activeDocuments = documentsByBrand[activeBrand] || [];
+  const activeDocuments = useMemo(
+    () => documentsByBrand[activeBrand] || [],
+    [activeBrand, documentsByBrand],
+  );
   const activeFolderOptions = useMemo(
     () => getFolderOptionsForBrand(activeDocuments, activeBrand),
     [activeBrand, activeDocuments],
@@ -1258,6 +1385,7 @@ function DocumentsPane({
     [activeBrand, activeDocuments, activeTopLevelFolder],
   );
   const selectedDocument = allDocuments.find((document) => document.path === selectedDocumentPath) || null;
+  const activeFolderLabel = activeTopLevelFolder || "All folders";
   const previewUrlWithPage = previewUrl && previewPageNumber ? `${previewUrl}#page=${previewPageNumber}` : previewUrl;
 
   return (
@@ -1271,22 +1399,45 @@ function DocumentsPane({
           </Button>
         </div>
 
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">PDF Library</p>
+            <p className="mt-1 text-2xl font-semibold tracking-tight">{allDocuments.length}</p>
+            <p className="text-[12px] leading-5 text-muted-foreground">Documents currently available in the library.</p>
+          </div>
+          <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Current Scope</p>
+            <p className="mt-1 text-lg font-semibold tracking-tight">{activeFolderLabel}</p>
+            <p className="text-[12px] leading-5 text-muted-foreground">{filteredDocuments.length} docs in current view.</p>
+          </div>
+          <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Search Matches</p>
+            <p className="mt-1 text-2xl font-semibold tracking-tight">{semanticResults.length}</p>
+            <p className="text-[12px] leading-5 text-muted-foreground">
+              {semanticQuery.trim() ? `Current query: ${semanticQuery.trim()}` : "Run semantic search in the active scope."}
+            </p>
+          </div>
+        </div>
+
         <div className="mb-4 flex flex-wrap gap-2">
           {SUPPORT_DOCUMENTS_BRANDS.map((brand) => (
             <Button
               key={brand}
               size="sm"
               variant={activeBrand === brand ? "secondary" : "ghost"}
-              className={`h-10 gap-0 px-2.5 ${brand === "omni_arena" ? "min-w-[108px]" : "min-w-[72px]"}`}
+              className="h-10 gap-2 px-2.5"
+              onClick={() => onSelectBrand(brand)}
               aria-label={brandMeta[brand].label}
               title={brandMeta[brand].label}
-              onClick={() => onSelectBrand(brand)}
             >
               <img
                 src={brandMeta[brand].logo}
                 alt={brandMeta[brand].label}
                 className={`w-auto shrink-0 object-contain ${brand === "omni_arena" ? "h-[18px]" : "h-5"}`}
               />
+              <span className="rounded-full border border-border/70 bg-background/55 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+                {(documentsByBrand[brand] || []).length}
+              </span>
             </Button>
           ))}
         </div>
@@ -1615,7 +1766,7 @@ function ReportsPane({
         <div>
           <h2 className="text-xl font-semibold tracking-tight">High-Impact Ticket Report</h2>
           <p className="mt-1 text-[13px] leading-6 text-muted-foreground">
-            Simplified for weekly execution: intake trend, active backlog, top issues, and top Omni Arena callers.
+            Simplified for weekly execution: intake trend, active backlog, top issues, and top caller activity.
           </p>
         </div>
 
@@ -1811,7 +1962,7 @@ function ReportsPane({
                   <p className="text-[12px] leading-5 text-muted-foreground">Open + Pending queue only.</p>
                 </div>
                 <p className="text-2xl font-semibold tracking-tight">{totalBacklogCount}</p>
-                <p className="text-[12px] text-muted-foreground">Total active tickets (Omni One + Omni Arena)</p>
+                <p className="text-[12px] text-muted-foreground">Total active tickets across both queues.</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border/65 bg-background/55 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/55 hover:bg-background/65 hover:shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni One</p>
@@ -1873,14 +2024,14 @@ function ReportsPane({
 
             <article className="surface-panel-soft space-y-3 p-4">
               <div>
-                <h3 className="text-lg font-semibold tracking-tight">Top Omni Arena Callers / Venues</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Top Arena Callers / Venues</h3>
                 <p className="text-[12px] leading-5 text-muted-foreground">
-                  Top requesters in the current Omni Arena open + pending queue.
+                  Top requesters in the current open + pending arena queue.
                 </p>
               </div>
 
               {omniArenaTopCallers.length === 0 ? (
-                <p className="text-[13px] text-muted-foreground">No active Omni Arena tickets.</p>
+                <p className="text-[13px] text-muted-foreground">No active arena tickets.</p>
               ) : (
                 <ol className="grid gap-2 sm:grid-cols-2">
                   {omniArenaTopCallers.map((entry, index) => (
@@ -1990,6 +2141,15 @@ export default function Hub() {
   const inReportsRoute = location.pathname === "/hub/reports";
   const inVideosRoute = location.pathname === "/hub/videos";
   const inTicketRoute = !inDigestRoute && !inDocumentsRoute && !inReportsRoute && !inVideosRoute;
+  const currentView: HubViewKey = inDigestRoute
+    ? "digests"
+    : inDocumentsRoute
+      ? "documents"
+      : inReportsRoute
+        ? "reports"
+        : inVideosRoute
+          ? "videos"
+          : "tickets";
 
   async function invokeFunctionRobust<T>(name: string, body: Record<string, unknown>): Promise<T> {
     try {
@@ -2114,10 +2274,10 @@ export default function Hub() {
             normalizeOptionalString(item.last_accessed_at),
           );
 
-          if (!collectedByPath.has(itemPath)) {
-            collectedByPath.set(itemPath, {
+          if (!collectedByPath.has(normalizedPath)) {
+            collectedByPath.set(normalizedPath, {
               brand,
-              path: itemPath,
+              path: normalizedPath,
               name: rawName,
               updatedAt,
               sizeBytes,
@@ -2692,7 +2852,7 @@ export default function Hub() {
     setDocumentsPreviewLoading(true);
     setDocumentsPreviewError(null);
 
-    supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).createSignedUrl(selectedDocumentPath, 60 * 60 * 12)
+    supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).createSignedUrl(normalizeStoragePath(selectedDocumentPath), 60 * 60 * 12)
       .then(({ data, error }) => {
         if (!mounted) return;
         if (error) {
@@ -2990,7 +3150,7 @@ export default function Hub() {
   function handleSelectDocument(file: SupportDocument) {
     setActiveDocumentsBrand(file.brand);
     setSelectedDocumentPreviewPageNumber(null);
-    setSelectedDocumentPath(file.path);
+    setSelectedDocumentPath(normalizeStoragePath(file.path));
   }
 
   function handleClearDocumentsSemanticSearch() {
@@ -3068,7 +3228,7 @@ export default function Hub() {
     setDownloadLoadingPath(file.path);
 
     try {
-      const { data, error } = await supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).download(file.path);
+      const { data, error } = await supabase.storage.from(SUPPORT_DOCUMENTS_BUCKET).download(normalizeStoragePath(file.path));
       if (error || !data) {
         throw new Error(error?.message || "Unable to download document.");
       }
@@ -3283,14 +3443,131 @@ export default function Hub() {
     });
   }
 
+  const videoLibraryEntries = useMemo(() => getHubVideoLibraryEntries(), []);
   const allTicketCount = omniOneTickets.length + omniArenaTickets.length;
-  const routeTabs = [
-    { label: "Tickets", path: "/hub", active: inTicketRoute },
-    { label: "Digests", path: "/hub/digests", active: inDigestRoute },
-    { label: "Documents", path: "/hub/documents", active: inDocumentsRoute },
-    { label: "Videos", path: "/hub/videos", active: inVideosRoute },
-    { label: "Reports", path: "/hub/reports", active: inReportsRoute },
+  const omniOneTicketCounts = useMemo(() => getTicketStatusCounts(omniOneTickets), [omniOneTickets]);
+  const omniArenaTicketCounts = useMemo(() => getTicketStatusCounts(omniArenaTickets), [omniArenaTickets]);
+  const activeBacklogCount = omniOneTicketCounts.open + omniOneTicketCounts.pending + omniArenaTicketCounts.open + omniArenaTicketCounts.pending;
+  const noSupportSitesCount = useMemo(
+    () =>
+      sites.filter((site) => {
+        const normalized = site.currentQuarterStatus.toLowerCase().trim();
+        return normalized === "no support" || normalized === "nosupport";
+      }).length,
+    [sites],
+  );
+  const allDocuments = useMemo(
+    () => flattenDocumentsByBrand(documentsByBrand),
+    [documentsByBrand],
+  );
+  const activeDocumentFolderCount = useMemo(
+    () => getFolderOptionsForBrand(documentsByBrand[activeDocumentsBrand] || [], activeDocumentsBrand).length,
+    [activeDocumentsBrand, documentsByBrand],
+  );
+  const selectedDigest = digests.find((digest) => digest.id === selectedDigestId) || null;
+  const featuredVideoCount = useMemo(
+    () => videoLibraryEntries.filter((video) => video.featured).length,
+    [videoLibraryEntries],
+  );
+  const omniOneVideoCount = useMemo(
+    () => videoLibraryEntries.filter((video) => video.brand === "omni_one").length,
+    [videoLibraryEntries],
+  );
+  const omniArenaVideoCount = useMemo(
+    () => videoLibraryEntries.filter((video) => video.brand === "omni_arena").length,
+    [videoLibraryEntries],
+  );
+  const routeTabs: HubRouteTab[] = [
+    { key: "tickets", label: "Tickets", path: "/hub", active: inTicketRoute, description: "Live Zendesk queue and sites" },
+    { key: "digests", label: "Digests", path: "/hub/digests", active: inDigestRoute, description: "Saved queue summaries" },
+    { key: "documents", label: "Documents", path: "/hub/documents", active: inDocumentsRoute, description: "PDF library and search" },
+    { key: "videos", label: "Videos", path: "/hub/videos", active: inVideosRoute, description: "Training and repair video library" },
+    { key: "reports", label: "Reports", path: "/hub/reports", active: inReportsRoute, description: "Weekly reporting and dispatch" },
   ];
+  const activeViewMeta: Record<HubViewKey, { kicker: string; title: string; description: string }> = {
+    tickets: {
+      kicker: "Operations Console",
+      title: "Ticket Operations",
+      description: "Review active Zendesk workload, open ticket detail, build digests, and monitor venue coverage from one workspace.",
+    },
+    digests: {
+      kicker: "Operational Summaries",
+      title: "Queue Digests",
+      description: "Keep recent AI-generated digests visible so handoffs, escalation notes, and queue snapshots stay reusable.",
+    },
+    documents: {
+      kicker: "Knowledge Base",
+      title: "Support Documents",
+      description: "Browse product PDFs, narrow by folder, and use semantic search to jump straight to the right reference material.",
+    },
+    videos: {
+      kicker: "Training Library",
+      title: "Support Videos",
+      description: "A curated library for repair, setup, and troubleshooting videos.",
+    },
+    reports: {
+      kicker: "Reporting",
+      title: "Weekly Ticket Reporting",
+      description: "Track intake trends, active backlog, and dispatch-ready summaries without leaving the hub.",
+    },
+  };
+  const workspaceMetrics: WorkspaceMetric[] = (() => {
+    switch (currentView) {
+      case "digests":
+        return [
+          { label: "Saved Digests", value: String(digests.length), detail: "Recent summaries stored in Supabase.", accent: true },
+          {
+            label: "Selected Digest",
+            value: String(selectedDigest?.ticket_ids.length ?? 0),
+            detail: selectedDigest ? `${selectedDigest.title}` : "Select a digest to inspect its ticket set.",
+          },
+          { label: "Active Backlog", value: String(activeBacklogCount), detail: "Open + pending tickets across both brands." },
+          {
+            label: "Latest Digest",
+            value: digests[0]?.created_at ? formatDateShort(digests[0].created_at) : "Not yet",
+            detail: digests[0] ? digests[0].title : "No digests have been created yet.",
+          },
+        ];
+      case "documents":
+        return [
+          { label: "PDF Library", value: String(allDocuments.length), detail: "Documents currently available in storage.", accent: true },
+          { label: "Omni One Docs", value: String(documentsByBrand.omni_one.length), detail: "Current Omni One document count." },
+          { label: "Omni Arena Docs", value: String(documentsByBrand.omni_arena.length), detail: "Current Omni Arena document count." },
+          {
+            label: "Active Scope",
+            value: documentsFolderByBrand[activeDocumentsBrand] || "All folders",
+            detail: `${activeDocumentsBrand === "omni_one" ? "Omni One" : "Omni Arena"} • ${activeDocumentFolderCount} folders`,
+          },
+        ];
+      case "videos":
+        return [
+          { label: "Video Library", value: String(videoLibraryEntries.length), detail: "Validated playable video entries.", accent: true },
+          { label: "Featured", value: String(featuredVideoCount), detail: "Pinned videos for common support flows." },
+          { label: "Omni One", value: String(omniOneVideoCount), detail: "Video entries for Omni One support." },
+          { label: "Omni Arena", value: String(omniArenaVideoCount), detail: "Video entries for Omni Arena support." },
+        ];
+      case "reports":
+        return [
+          { label: "Report Rows", value: String(weeklyReportRows.length), detail: "Rows loaded for the selected weekly report.", accent: true },
+          { label: "Week Start", value: formatDateShort(weeklyReportStartDate), detail: "Current reporting window anchor date." },
+          { label: "Active Backlog", value: String(activeBacklogCount), detail: "Open + pending queue used for report context." },
+          {
+            label: "Last Sync",
+            value: lastSync?.status || "Unknown",
+            detail: lastSync?.finishedAt ? formatDateTime(lastSync.finishedAt) : "No sync metadata available yet.",
+          },
+        ];
+      case "tickets":
+      default:
+        return [
+          { label: "Cached Tickets", value: String(allTicketCount), detail: "Latest cached records across both brands.", accent: true },
+          { label: "Active Backlog", value: String(activeBacklogCount), detail: "Open + pending tickets needing follow-through." },
+          { label: "Selected", value: String(selectedTicketIds.size), detail: "Selections can span both queues for digest generation." },
+          { label: "No-Support Sites", value: String(noSupportSitesCount), detail: "Arena venues currently flagged as no support." },
+        ];
+    }
+  })();
+  const currentViewMeta = activeViewMeta[currentView];
 
   if (loadingSession) {
     return (
@@ -3427,8 +3704,11 @@ export default function Hub() {
             <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
           </Link>
           <div className="flex items-center gap-2">
-            <span className="hidden text-[12px] text-muted-foreground lg:inline">{userEmail}</span>
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
+            <Button asChild size="sm" variant="ghost" className="hidden sm:inline-flex">
+              <Link to="/">Public Schedule</Link>
+            </Button>
+            <span className="hidden text-[12px] text-muted-foreground xl:inline">{userEmail}</span>
+            <Button size="sm" variant="outline" className="gap-2 xl:hidden" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
               <Menu className="h-4 w-4" />
               <span className="hidden sm:inline">Menu</span>
             </Button>
@@ -3436,167 +3716,247 @@ export default function Hub() {
         </div>
       </div>
 
-      <div className="container relative z-10 max-w-[2200px] px-4 py-6">
-        <section className="space-y-5">
-          <section className="surface-panel reveal-up relative overflow-hidden p-6 md:p-7">
-            <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-primary/18 blur-3xl" />
-            <div className="relative space-y-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-1.5">
-                  <p className="brand-kicker">Operations Console</p>
-                  <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight md:text-4xl">Support Hub</h1>
-                  <p className="text-[15px] leading-6 text-muted-foreground md:text-[16px]">
-                    {allTicketCount} cached tickets across Omni One and Omni Arena.
-                  </p>
-                  <p className="text-[12px] text-muted-foreground">
-                    {lastSync?.finishedAt
-                      ? `Last sync: ${new Date(lastSync.finishedAt).toLocaleString()} • Status: ${lastSync.status} • Updated: ${lastSync.ticketsUpserted}`
-                      : "Last sync: not available yet"}
-                  </p>
-                  {syncMessage ? <p className="text-[12px] text-muted-foreground">{syncMessage}</p> : null}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button onClick={handleSyncNow} disabled={syncLoading}>
-                    {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    {syncLoading ? "Syncing..." : "Sync Zendesk"}
-                  </Button>
-                  <Button variant="outline" onClick={handleBackfillOneYear} disabled={syncLoading}>
-                    {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    {syncLoading ? "Running..." : "Backfill 1 Year"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {routeTabs.map((tab) => (
-                  <Button
-                    key={tab.path}
-                    size="sm"
-                    variant={tab.active ? "secondary" : "ghost"}
-                    className={tab.active ? "border-primary/40 bg-primary/12 text-primary" : ""}
-                    onClick={() => navigate(tab.path)}
-                  >
-                    {tab.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {inDigestRoute ? (
-            <DigestsPane
-              digests={digests}
-              loading={digestsLoading}
-              error={digestsError}
-              selectedDigestId={selectedDigestId}
-              onSelectDigest={setSelectedDigestId}
-              onSendToSlack={sendDigestToSlack}
-              onCopyMarkdown={copyDigestMarkdown}
-              onCopyTable={copyDigestTable}
+      <div className="container relative z-10 max-w-[2200px] px-4 py-6 lg:py-7">
+        <div className="grid gap-6 xl:grid-cols-[290px_minmax(0,1fr)] 2xl:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="hidden xl:block xl:sticky xl:top-6 xl:self-start">
+            <SideNavigation
+              userEmail={userEmail}
+              onSignOut={() => void handleSignOut()}
+              onNavigate={() => setMobileNavOpen(false)}
+              routes={routeTabs}
+              allTicketCount={allTicketCount}
+              activeBacklogCount={activeBacklogCount}
+              lastSync={lastSync}
             />
-          ) : inDocumentsRoute ? (
-            <DocumentsPane
-              documentsByBrand={documentsByBrand}
-              loading={documentsLoading}
-              error={documentsError}
-              activeBrand={activeDocumentsBrand}
-              activeTopLevelFolder={documentsFolderByBrand[activeDocumentsBrand]}
-              selectedDocumentPath={selectedDocumentPath}
-              previewUrl={selectedDocumentPreviewUrl}
-              previewPageNumber={selectedDocumentPreviewPageNumber}
-              previewLoading={documentsPreviewLoading}
-              previewError={documentsPreviewError}
-              downloadingDocumentPath={downloadLoadingPath}
-              semanticQuery={documentsSemanticQuery}
-              semanticSearching={documentsSemanticSearching}
-              semanticError={documentsSemanticError}
-              semanticResults={documentsSemanticResults}
-              onRefresh={refreshDocuments}
-              onSelectBrand={handleSelectDocumentsBrand}
-              onSelectTopLevelFolder={handleSelectDocumentsTopLevelFolder}
-              onSelectDocument={handleSelectDocument}
-              onDownloadDocument={handleDownloadDocument}
-              onSemanticQueryChange={setDocumentsSemanticQuery}
-              onSemanticSearch={handleSemanticSearchDocuments}
-              onClearSemanticSearch={handleClearDocumentsSemanticSearch}
-              onSelectSemanticResult={handleSelectSemanticDocumentResult}
-            />
-          ) : inReportsRoute ? (
-            <ReportsPane
-              rows={weeklyReportRows}
-              previousRows={weeklyReportPreviousRows}
-              receivedRollupRows={receivedRollupRows}
-              receivedRollupLoading={receivedRollupLoading}
-              receivedRollupError={receivedRollupError}
-              omniOneTickets={omniOneTickets}
-              omniArenaTickets={omniArenaTickets}
-              loading={weeklyReportLoading}
-              error={weeklyReportError}
-              weekStartDate={weeklyReportStartDate}
-              onWeekStartDateChange={setWeeklyReportStartDate}
-              onRefresh={refreshWeeklyReport}
-              onRefreshReceivedRollup={refreshReceivedRollup}
-              onCopySummary={handleCopyWeeklySummary}
-              dispatchPreview={weeklyDispatchPreview}
-              dispatchLoading={weeklyDispatchLoading}
-              onPreviewDispatch={handlePreviewWeeklyDispatch}
-              onSendDispatch={handleSendWeeklyDispatchNow}
-              onClearDispatchPreview={() => setWeeklyDispatchPreview(null)}
-            />
-          ) : inVideosRoute ? (
-            <VideosPane />
-          ) : (
-            <section className="grid gap-5 xl:gap-6 2xl:grid-cols-2">
-              <section className="surface-panel space-y-4 p-5 md:p-6">
-                <div className="flex items-center justify-between border-b border-border/55 pb-3">
-                  <img src={omniOneLogo} alt="Omni One" className="h-7 w-auto" />
-                  <span className="brand-chip">{omniOneTickets.length} tickets</span>
-                </div>
-                <TicketTable
-                  rows={omniOneTickets}
-                  loading={ticketsLoading}
-                  error={ticketsError}
-                  selectedIds={selectedTicketIds}
-                  onSelectionChange={setSelection}
-                  onSelectAllVisible={setSelectionForMany}
-                  onOpenTicket={openTicket}
-                  onGenerateDigest={handleGenerateDigest}
-                  generatingDigest={generatingDigest}
-                />
-              </section>
+          </aside>
 
-              <section className="surface-panel space-y-4 p-5 md:p-6">
-                <div className="flex items-center justify-between border-b border-border/55 pb-3">
-                  <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
-                  <span className="brand-chip">{omniArenaTickets.length} tickets</span>
-                </div>
-                <TicketTable
-                  rows={omniArenaTickets}
-                  loading={ticketsLoading}
-                  error={ticketsError}
-                  selectedIds={selectedTicketIds}
-                  onSelectionChange={setSelection}
-                  onSelectAllVisible={setSelectionForMany}
-                  onOpenTicket={openTicket}
-                  onGenerateDigest={handleGenerateDigest}
-                  generatingDigest={generatingDigest}
-                />
-              </section>
+          <section className="space-y-5">
+            <section className="surface-panel reveal-up relative overflow-hidden p-6 md:p-7">
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-primary/18 blur-3xl" />
+              <div className="relative space-y-5">
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <p className="brand-kicker">{currentViewMeta.kicker}</p>
+                      <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight md:text-4xl">
+                        {currentViewMeta.title}
+                      </h1>
+                      <p className="max-w-3xl text-[15px] leading-6 text-muted-foreground md:text-[16px]">
+                        {currentViewMeta.description}
+                      </p>
+                    </div>
 
-              <section className="surface-panel space-y-4 p-5 md:p-6 2xl:col-span-2">
-                <div className="flex items-center justify-between border-b border-border/55 pb-3">
-                  <div className="flex items-center gap-2">
-                    <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
-                    <span className="text-sm text-muted-foreground">Sites</span>
+                    <div className="flex flex-wrap gap-2">
+                      {routeTabs.map((tab) => (
+                        <Button
+                          key={tab.path}
+                          size="sm"
+                          variant={tab.active ? "secondary" : "ghost"}
+                          className={tab.active ? "border-primary/40 bg-primary/12 text-primary" : ""}
+                          onClick={() => navigate(tab.path)}
+                        >
+                          {tab.label}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                  <span className="brand-chip">{sites.length} venues</span>
+
+                  <div className="surface-panel-soft space-y-3 p-4">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Data Sync</p>
+                      <p className="mt-2 text-2xl font-semibold tracking-tight">{lastSync?.status || "Not available"}</p>
+                      <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                        {lastSync?.finishedAt
+                          ? `Last completed ${formatDateTime(lastSync.finishedAt)}. ${lastSync.ticketsUpserted} tickets updated in that run.`
+                          : "Run a sync to refresh cached Zendesk data and downstream reporting."}
+                      </p>
+                    </div>
+
+                    {syncMessage ? (
+                      <p className="rounded-xl border border-border/65 bg-background/45 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+                        {syncMessage}
+                      </p>
+                    ) : null}
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button onClick={handleSyncNow} disabled={syncLoading}>
+                        {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                        {syncLoading ? "Syncing..." : "Sync Zendesk"}
+                      </Button>
+                      <Button variant="outline" onClick={handleBackfillOneYear} disabled={syncLoading}>
+                        {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                        {syncLoading ? "Running..." : "Backfill 1 Year"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <ArenaSitesTable sites={sites} loading={sitesLoading} error={sitesError} />
-              </section>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {workspaceMetrics.map((metric) => (
+                    <WorkspaceMetricCard key={metric.label} {...metric} />
+                  ))}
+                </div>
+              </div>
             </section>
-          )}
-        </section>
+
+            <PaneErrorBoundary key={currentView}>
+              {inDigestRoute ? (
+                <DigestsPane
+                  digests={digests}
+                  loading={digestsLoading}
+                  error={digestsError}
+                  selectedDigestId={selectedDigestId}
+                  onSelectDigest={setSelectedDigestId}
+                  onSendToSlack={sendDigestToSlack}
+                  onCopyMarkdown={copyDigestMarkdown}
+                  onCopyTable={copyDigestTable}
+                />
+              ) : inDocumentsRoute ? (
+                <DocumentsPane
+                  documentsByBrand={documentsByBrand}
+                  loading={documentsLoading}
+                  error={documentsError}
+                  activeBrand={activeDocumentsBrand}
+                  activeTopLevelFolder={documentsFolderByBrand[activeDocumentsBrand]}
+                  selectedDocumentPath={selectedDocumentPath}
+                  previewUrl={selectedDocumentPreviewUrl}
+                  previewPageNumber={selectedDocumentPreviewPageNumber}
+                  previewLoading={documentsPreviewLoading}
+                  previewError={documentsPreviewError}
+                  downloadingDocumentPath={downloadLoadingPath}
+                  semanticQuery={documentsSemanticQuery}
+                  semanticSearching={documentsSemanticSearching}
+                  semanticError={documentsSemanticError}
+                  semanticResults={documentsSemanticResults}
+                  onRefresh={refreshDocuments}
+                  onSelectBrand={handleSelectDocumentsBrand}
+                  onSelectTopLevelFolder={handleSelectDocumentsTopLevelFolder}
+                  onSelectDocument={handleSelectDocument}
+                  onDownloadDocument={handleDownloadDocument}
+                  onSemanticQueryChange={setDocumentsSemanticQuery}
+                  onSemanticSearch={handleSemanticSearchDocuments}
+                  onClearSemanticSearch={handleClearDocumentsSemanticSearch}
+                  onSelectSemanticResult={handleSelectSemanticDocumentResult}
+                />
+              ) : inReportsRoute ? (
+                <ReportsPane
+                  rows={weeklyReportRows}
+                  previousRows={weeklyReportPreviousRows}
+                  receivedRollupRows={receivedRollupRows}
+                  receivedRollupLoading={receivedRollupLoading}
+                  receivedRollupError={receivedRollupError}
+                  omniOneTickets={omniOneTickets}
+                  omniArenaTickets={omniArenaTickets}
+                  loading={weeklyReportLoading}
+                  error={weeklyReportError}
+                  weekStartDate={weeklyReportStartDate}
+                  onWeekStartDateChange={setWeeklyReportStartDate}
+                  onRefresh={refreshWeeklyReport}
+                  onRefreshReceivedRollup={refreshReceivedRollup}
+                  onCopySummary={handleCopyWeeklySummary}
+                  dispatchPreview={weeklyDispatchPreview}
+                  dispatchLoading={weeklyDispatchLoading}
+                  onPreviewDispatch={handlePreviewWeeklyDispatch}
+                  onSendDispatch={handleSendWeeklyDispatchNow}
+                  onClearDispatchPreview={() => setWeeklyDispatchPreview(null)}
+                />
+              ) : inVideosRoute ? (
+                <VideosPane />
+              ) : (
+                <>
+                  <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <WorkspaceMetricCard
+                      label="Active Queue"
+                      value={String(activeBacklogCount)}
+                      detail="Open + pending tickets across both brands."
+                      accent
+                    />
+                    <WorkspaceMetricCard
+                      label="Omni One Active"
+                      value={String(omniOneTicketCounts.active)}
+                      detail={`Open ${omniOneTicketCounts.open} • Pending ${omniOneTicketCounts.pending} • New ${omniOneTicketCounts.new}`}
+                    />
+                    <WorkspaceMetricCard
+                      label="Omni Arena Active"
+                      value={String(omniArenaTicketCounts.active)}
+                      detail={`Open ${omniArenaTicketCounts.open} • Pending ${omniArenaTicketCounts.pending} • New ${omniArenaTicketCounts.new}`}
+                    />
+                    <WorkspaceMetricCard
+                      label="Arena Sites"
+                      value={String(sites.length)}
+                      detail={`${noSupportSitesCount} venues currently flagged as no support.`}
+                    />
+                  </section>
+
+                  <section className="rounded-2xl border border-border/70 bg-background/35 px-5 py-4 text-[13px] leading-6 text-muted-foreground">
+                    Ticket selections persist across both brand tables. Open any ticket to generate a fresh summary, copy it,
+                    or send it to Slack without leaving the queue view.
+                  </section>
+
+                  <section className="grid gap-5 xl:gap-6 2xl:grid-cols-2">
+                    <section className="surface-panel space-y-4 p-5 md:p-6">
+                      <div className="flex items-center justify-between border-b border-border/55 pb-3">
+                        <div>
+                          <img src={omniOneLogo} alt="Omni One" className="h-7 w-auto" />
+                          <p className="mt-2 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
+                        </div>
+                        <span className="brand-chip">{omniOneTickets.length} tickets</span>
+                      </div>
+                      <TicketTable
+                        rows={omniOneTickets}
+                        loading={ticketsLoading}
+                        error={ticketsError}
+                        selectedIds={selectedTicketIds}
+                        onSelectionChange={setSelection}
+                        onSelectAllVisible={setSelectionForMany}
+                        onOpenTicket={openTicket}
+                        onGenerateDigest={handleGenerateDigest}
+                        generatingDigest={generatingDigest}
+                      />
+                    </section>
+
+                    <section className="surface-panel space-y-4 p-5 md:p-6">
+                      <div className="flex items-center justify-between border-b border-border/55 pb-3">
+                        <div>
+                          <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
+                          <p className="mt-2 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
+                        </div>
+                        <span className="brand-chip">{omniArenaTickets.length} tickets</span>
+                      </div>
+                      <TicketTable
+                        rows={omniArenaTickets}
+                        loading={ticketsLoading}
+                        error={ticketsError}
+                        selectedIds={selectedTicketIds}
+                        onSelectionChange={setSelection}
+                        onSelectAllVisible={setSelectionForMany}
+                        onOpenTicket={openTicket}
+                        onGenerateDigest={handleGenerateDigest}
+                        generatingDigest={generatingDigest}
+                      />
+                    </section>
+
+                    <section className="surface-panel space-y-4 p-5 md:p-6 2xl:col-span-2">
+                      <div className="flex items-center justify-between border-b border-border/55 pb-3">
+                        <div className="flex items-center gap-2">
+                          <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
+                          <div>
+                            <span className="text-sm text-muted-foreground">Arena Sites</span>
+                            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                              Filter and search venue coverage status without leaving the ticket workspace.
+                            </p>
+                          </div>
+                        </div>
+                        <span className="brand-chip">{sites.length} venues</span>
+                      </div>
+                      <ArenaSitesTable sites={sites} loading={sitesLoading} error={sitesError} />
+                    </section>
+                  </section>
+                </>
+              )}
+            </PaneErrorBoundary>
+          </section>
+        </div>
       </div>
 
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
@@ -3606,6 +3966,10 @@ export default function Hub() {
               userEmail={userEmail}
               onSignOut={() => void handleSignOut()}
               onNavigate={() => setMobileNavOpen(false)}
+              routes={routeTabs}
+              allTicketCount={allTicketCount}
+              activeBacklogCount={activeBacklogCount}
+              lastSync={lastSync}
             />
           </div>
         </SheetContent>
