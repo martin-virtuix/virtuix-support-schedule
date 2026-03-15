@@ -6,7 +6,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
 import { CopilotChatDock, type CopilotChatInputMessage } from "@/components/hub/CopilotChatDock";
@@ -18,7 +17,6 @@ import type {
   CopilotChatResponse,
   CreateDigestResponse,
   Digest,
-  HubAnalyticsBaselineRow,
   HubAnalyticsTrackResponse,
   SemanticSearchDocumentResult,
   SemanticSearchDocumentsResponse,
@@ -26,7 +24,6 @@ import type {
   SummarizeTicketResponse,
   SyncZendeskResponse,
   Ticket,
-  TicketDataCoverageRow,
   TicketReceivedRollupRow,
   TicketSummary,
   WeeklyTicketReportDispatchResponse,
@@ -100,41 +97,88 @@ type SupportDocument = {
 };
 
 const ACTIVE_TICKET_STATUSES = new Set(["new", "open", "pending"]);
+const REPORT_BACKLOG_STATUSES = new Set(["open", "pending"]);
 
-type ParsedImportedVenueRow = {
-  venue: string;
-  totalPlays: number;
-  uniquePlayers: number;
-};
-
-type ImportedVenueSummary = {
-  venue: string;
-  totalPlays: number;
-  uniquePlayers: number;
-  playsPerPlayer: number;
-};
-
-type ImportedMetricSummary = {
-  key: "total_plays" | "total_unique_players" | "total_venues" | "avg_plays_per_venue" | "avg_unique_per_venue" | "avg_plays_per_player";
+type ReportCountEntry = {
   label: string;
-  value: number;
-  format: "integer" | "decimal";
-  subtitle: string;
+  count: number;
 };
 
-type ImportedSqlReport = {
-  totalParsedRows: number;
-  skippedRows: number;
-  totalPlays: number;
-  totalUniquePlayers: number;
-  venueCount: number;
-  averagePlaysPerVenue: number;
-  averageUniquePlayersPerVenue: number;
-  averagePlaysPerPlayer: number;
-  venues: ImportedVenueSummary[];
-  topVenues: ImportedVenueSummary[];
-  metricSummaries: ImportedMetricSummary[];
-};
+const TICKET_THEME_RULES: Array<{ label: string; pattern: RegExp }> = [
+  { label: "Display / TV", pattern: /\b(tv|display|screen|monitor)\b/i },
+  { label: "PC / Hardware", pattern: /\b(pc|computer|gpu|cpu|motherboard|power supply|ssd|hardware)\b/i },
+  { label: "Cabling / Electrical", pattern: /\b(cable|he cable|wiring|connector|usb|hdmi|ethernet|power cable)\b/i },
+  { label: "Mechanical / Parts", pattern: /\b(agg|ring handle|handle|latch|arm|bracket|frame|strap|foot tracker|tracker)\b/i },
+  { label: "Setup / Calibration", pattern: /\b(setup|set up|install|assemble|pair|calibration|calibrate|adjust)\b/i },
+  { label: "Shipping / RMA", pattern: /\b(rma|shipping|shipment|return|warranty|replacement|replace)\b/i },
+  { label: "Software / Account", pattern: /\b(software|firmware|app|launcher|steam|login|password|account)\b/i },
+  { label: "Billing / Orders", pattern: /\b(billing|invoice|payment|refund|charge|order|purchase|quote)\b/i },
+];
+
+function isReportBacklogStatus(status: string): boolean {
+  return REPORT_BACKLOG_STATUSES.has(status.toLowerCase());
+}
+
+function getOpenPendingTickets(rows: Ticket[]): Ticket[] {
+  return rows.filter((ticket) => isReportBacklogStatus(ticket.status));
+}
+
+function getOpenPendingStatusCounts(rows: Ticket[]): { open: number; pending: number; total: number } {
+  const counts = rows.reduce(
+    (accumulator, ticket) => {
+      const normalizedStatus = ticket.status.toLowerCase();
+      if (normalizedStatus === "open") accumulator.open += 1;
+      if (normalizedStatus === "pending") accumulator.pending += 1;
+      return accumulator;
+    },
+    { open: 0, pending: 0 },
+  );
+
+  return {
+    ...counts,
+    total: counts.open + counts.pending,
+  };
+}
+
+function toTopCounts(values: Array<string | null | undefined>, limit = 3): ReportCountEntry[] {
+  const counts = new Map<string, number>();
+
+  values.forEach((value) => {
+    const normalized = value?.trim();
+    if (!normalized) return;
+    counts.set(normalized, (counts.get(normalized) || 0) + 1);
+  });
+
+  return Array.from(counts.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0]);
+    })
+    .slice(0, limit)
+    .map(([label, count]) => ({ label, count }));
+}
+
+function getTicketTheme(subject: string): string {
+  const normalizedSubject = subject.trim();
+  if (normalizedSubject.length === 0) return "General Support";
+
+  const matchedRule = TICKET_THEME_RULES.find((rule) => rule.pattern.test(normalizedSubject));
+  return matchedRule?.label || "General Support";
+}
+
+function getTopTicketThemes(rows: Ticket[], limit = 3): ReportCountEntry[] {
+  return toTopCounts(rows.map((ticket) => getTicketTheme(ticket.subject)), limit);
+}
+
+function getTicketRequesterLabel(ticket: Ticket): string {
+  const requester = firstNonEmptyString(ticket.requester_name, ticket.requester_email);
+  if (!requester) return "Unknown requester";
+  return requester;
+}
+
+function getTopTicketRequesters(rows: Ticket[], limit = 5): ReportCountEntry[] {
+  return toTopCounts(rows.map((ticket) => getTicketRequesterLabel(ticket)), limit);
+}
 
 type ClientAuthDebug = {
   token_prefix: string | null;
@@ -253,333 +297,12 @@ function formatSignedIntDelta(value: number): string {
   return `${rounded}`;
 }
 
-function formatSignedRateDelta(rateDelta: number): string {
-  const points = rateDelta * 100;
-  const normalized = Math.abs(points) < 0.05 ? 0 : Number(points.toFixed(1));
-  if (normalized > 0) return `+${normalized.toFixed(1)}pp`;
-  return `${normalized.toFixed(1)}pp`;
-}
-
-function formatPercentDelta(value: number | null): string {
+function formatSignedPercentDelta(value: number | null): string {
   if (value === null || Number.isNaN(value)) return "n/a";
   const percent = value * 100;
   const normalized = Math.abs(percent) < 0.05 ? 0 : Number(percent.toFixed(1));
   if (normalized > 0) return `+${normalized.toFixed(1)}%`;
   return `${normalized.toFixed(1)}%`;
-}
-
-function getWeeklyCardToneClass(brand: string): string {
-  switch (brand) {
-    case "total":
-      return "from-primary/14 to-primary/8 hover:from-primary/22 hover:to-primary/12";
-    case "omni_one":
-      return "from-primary/12 to-emerald-500/8 hover:from-primary/20 hover:to-emerald-500/12";
-    case "omni_arena":
-      return "from-primary/10 to-lime-500/8 hover:from-primary/18 hover:to-lime-500/12";
-    default:
-      return "from-primary/8 to-primary/5 hover:from-primary/16 hover:to-primary/10";
-  }
-}
-
-function getRollupCardToneClass(period: string): string {
-  switch (period) {
-    case "month":
-      return "from-primary/12 to-emerald-500/9 hover:from-primary/20 hover:to-emerald-500/14";
-    case "quarter":
-      return "from-primary/12 to-lime-500/9 hover:from-primary/20 hover:to-lime-500/14";
-    case "year":
-      return "from-primary/12 to-green-500/9 hover:from-primary/20 hover:to-green-500/14";
-    default:
-      return "from-primary/10 to-primary/8 hover:from-primary/18 hover:to-primary/12";
-  }
-}
-
-function getSqlImportMetricToneClass(key: ImportedMetricSummary["key"]): string {
-  switch (key) {
-    case "total_plays":
-      return "from-primary/14 to-primary/9 hover:from-primary/22 hover:to-primary/14";
-    case "total_unique_players":
-      return "from-primary/12 to-emerald-500/10 hover:from-primary/20 hover:to-emerald-500/16";
-    case "total_venues":
-      return "from-primary/12 to-lime-500/10 hover:from-primary/20 hover:to-lime-500/16";
-    case "avg_plays_per_venue":
-      return "from-primary/11 to-green-500/9 hover:from-primary/19 hover:to-green-500/14";
-    case "avg_unique_per_venue":
-      return "from-primary/10 to-teal-500/9 hover:from-primary/18 hover:to-teal-500/14";
-    case "avg_plays_per_player":
-      return "from-primary/11 to-emerald-400/10 hover:from-primary/19 hover:to-emerald-400/15";
-    default:
-      return "from-primary/10 to-primary/8 hover:from-primary/18 hover:to-primary/12";
-  }
-}
-
-function splitDelimitedLine(line: string, delimiter: string): string[] {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const nextChar = index + 1 < line.length ? line[index + 1] : "";
-
-    if (char === "\"") {
-      if (inQuotes && nextChar === "\"") {
-        current += "\"";
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (!inQuotes && char === delimiter) {
-      values.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-
-  values.push(current.trim());
-  return values;
-}
-
-function detectDelimiter(headerLine: string): string {
-  const tabCount = (headerLine.match(/\t/g) || []).length;
-  const commaCount = (headerLine.match(/,/g) || []).length;
-  if (tabCount > 0 && tabCount >= commaCount) return "\t";
-  return ",";
-}
-
-function normalizeHeaderKey(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function findHeaderIndex(headers: string[], candidates: string[]): number {
-  const normalizedCandidates = new Set(candidates.map((candidate) => normalizeHeaderKey(candidate)));
-  return headers.findIndex((header) => normalizedCandidates.has(normalizeHeaderKey(header)));
-}
-
-function parseImportNumber(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const normalized = trimmed.replace(/,/g, "");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatMetricValue(metric: ImportedMetricSummary): string {
-  if (metric.format === "integer") {
-    return Math.round(metric.value).toLocaleString();
-  }
-  return metric.value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function parseImportedVenueRows(rawInput: string): {
-  rows: ParsedImportedVenueRow[];
-  rowCount: number;
-  skippedRows: number;
-} {
-  const normalizedInput = rawInput
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .trim();
-
-  if (!normalizedInput) {
-    throw new Error("Paste SQL export rows (CSV/TSV) first.");
-  }
-
-  const lines = normalizedInput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length < 2) {
-    throw new Error("Need at least a header row and one data row.");
-  }
-
-  const delimiter = detectDelimiter(lines[0]);
-  const headers = splitDelimitedLine(lines[0], delimiter);
-
-  const venueIndex = findHeaderIndex(headers, [
-    "venue",
-    "name",
-    "shop_name",
-    "shop",
-    "location",
-    "site",
-  ]);
-  const totalPlaysIndex = findHeaderIndex(headers, [
-    "total_plays",
-    "totalplays",
-    "total plays",
-    "plays",
-    "play_count",
-    "playcount",
-    "sessions",
-    "total_sessions",
-  ]);
-  const uniquePlayersIndex = findHeaderIndex(headers, [
-    "unique_players",
-    "uniqueplayers",
-    "unique players",
-    "players",
-    "distinct_players",
-    "distinctplayers",
-  ]);
-
-  if (venueIndex < 0 || totalPlaysIndex < 0 || uniquePlayersIndex < 0) {
-    throw new Error("Could not find required columns. Required headers: Venue, Total_Plays, Unique_Players.");
-  }
-
-  const rows: ParsedImportedVenueRow[] = [];
-  let skippedRows = 0;
-
-  for (const line of lines.slice(1)) {
-    const values = splitDelimitedLine(line, delimiter);
-    if (values.length === 0) continue;
-    const venue = (values[venueIndex] || "").trim();
-    const totalPlays = parseImportNumber(values[totalPlaysIndex] || "");
-    const uniquePlayers = parseImportNumber(values[uniquePlayersIndex] || "");
-
-    if (!venue || totalPlays === null || uniquePlayers === null) {
-      skippedRows += 1;
-      continue;
-    }
-
-    rows.push({
-      venue,
-      totalPlays,
-      uniquePlayers,
-    });
-  }
-
-  if (rows.length === 0) {
-    throw new Error("No valid rows found. Confirm headers are Venue, Total_Plays, Unique_Players.");
-  }
-
-  return {
-    rows,
-    rowCount: rows.length,
-    skippedRows,
-  };
-}
-
-function buildImportedSqlReport(
-  rows: ParsedImportedVenueRow[],
-  skippedRows: number,
-): ImportedSqlReport {
-  const venues = rows
-    .map((row) => {
-      const playsPerPlayer = row.uniquePlayers > 0 ? row.totalPlays / row.uniquePlayers : 0;
-      return {
-        venue: row.venue,
-        totalPlays: row.totalPlays,
-        uniquePlayers: row.uniquePlayers,
-        playsPerPlayer,
-      };
-    })
-    .sort((a, b) => b.totalPlays - a.totalPlays);
-
-  const totalPlays = venues.reduce((sum, row) => sum + row.totalPlays, 0);
-  const totalUniquePlayers = venues.reduce((sum, row) => sum + row.uniquePlayers, 0);
-  const venueCount = venues.length;
-  const averagePlaysPerVenue = venueCount > 0 ? totalPlays / venueCount : 0;
-  const averageUniquePlayersPerVenue = venueCount > 0 ? totalUniquePlayers / venueCount : 0;
-  const averagePlaysPerPlayer = totalUniquePlayers > 0 ? totalPlays / totalUniquePlayers : 0;
-
-  const metricSummaries: ImportedMetricSummary[] = [
-    {
-      key: "total_plays",
-      label: "Total Plays",
-      value: totalPlays,
-      format: "integer",
-      subtitle: "All sessions in the pasted dataset",
-    },
-    {
-      key: "total_unique_players",
-      label: "Unique Players",
-      value: totalUniquePlayers,
-      format: "integer",
-      subtitle: "Distinct players aggregated by venue",
-    },
-    {
-      key: "total_venues",
-      label: "Venues",
-      value: venueCount,
-      format: "integer",
-      subtitle: "Total locations in this report",
-    },
-    {
-      key: "avg_plays_per_venue",
-      label: "Avg Plays / Venue",
-      value: averagePlaysPerVenue,
-      format: "decimal",
-      subtitle: "Average session volume per location",
-    },
-    {
-      key: "avg_unique_per_venue",
-      label: "Avg Unique / Venue",
-      value: averageUniquePlayersPerVenue,
-      format: "decimal",
-      subtitle: "Average unique players per location",
-    },
-    {
-      key: "avg_plays_per_player",
-      label: "Plays / Player",
-      value: averagePlaysPerPlayer,
-      format: "decimal",
-      subtitle: "Average sessions per unique player",
-    },
-  ];
-
-  return {
-    totalParsedRows: rows.length,
-    skippedRows,
-    totalPlays,
-    totalUniquePlayers,
-    venueCount,
-    averagePlaysPerVenue,
-    averageUniquePlayersPerVenue,
-    averagePlaysPerPlayer,
-    venues,
-    topVenues: venues.slice(0, 10),
-    metricSummaries,
-  };
-}
-
-function formatDecimalValue(value: number, digits = 2): string {
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
-
-function buildImportedSqlSummary(report: ImportedSqlReport): string {
-  const lines: string[] = [
-    "Imported Venue Performance Report",
-    `${report.totalParsedRows} venues parsed${report.skippedRows > 0 ? `, ${report.skippedRows} skipped row(s)` : ""}.`,
-    `Total Plays: ${Math.round(report.totalPlays).toLocaleString()}`,
-    `Unique Players: ${Math.round(report.totalUniquePlayers).toLocaleString()}`,
-    `Venue Count: ${Math.round(report.venueCount).toLocaleString()}`,
-    `Avg Plays / Venue: ${formatDecimalValue(report.averagePlaysPerVenue)}`,
-    `Avg Unique / Venue: ${formatDecimalValue(report.averageUniquePlayersPerVenue)}`,
-    `Avg Plays / Player: ${formatDecimalValue(report.averagePlaysPerPlayer)}`,
-  ];
-
-  lines.push("");
-  lines.push("Top Venues by Total Plays:");
-  report.topVenues.forEach((venue, index) => {
-    lines.push(
-      `${index + 1}. ${venue.venue} - ${Math.round(venue.totalPlays).toLocaleString()} plays, ${Math.round(venue.uniquePlayers).toLocaleString()} unique (${formatDecimalValue(venue.playsPerPlayer)} plays/player)`,
-    );
-  });
-
-  return lines.join("\n");
 }
 
 function formatFileSize(sizeBytes: number | null): string {
@@ -1770,67 +1493,46 @@ function ReportsPane({
   receivedRollupRows,
   receivedRollupLoading,
   receivedRollupError,
-  analyticsBaseline,
-  analyticsBaselineLoading,
-  analyticsBaselineError,
-  coverage,
-  coverageLoading,
-  coverageError,
+  omniOneTickets,
+  omniArenaTickets,
   loading,
   error,
   weekStartDate,
-  rollupReferenceDate,
   onWeekStartDateChange,
-  onRollupReferenceDateChange,
   onRefresh,
   onRefreshReceivedRollup,
   onCopySummary,
-  onCopyReceivedRollupSummary,
   dispatchPreview,
   dispatchLoading,
   onPreviewDispatch,
   onSendDispatch,
   onClearDispatchPreview,
-  onTrackEvent,
 }: {
   rows: WeeklyTicketReportRow[];
   previousRows: WeeklyTicketReportRow[];
   receivedRollupRows: TicketReceivedRollupRow[];
   receivedRollupLoading: boolean;
   receivedRollupError: string | null;
-  analyticsBaseline: HubAnalyticsBaselineRow | null;
-  analyticsBaselineLoading: boolean;
-  analyticsBaselineError: string | null;
-  coverage: TicketDataCoverageRow | null;
-  coverageLoading: boolean;
-  coverageError: string | null;
+  omniOneTickets: Ticket[];
+  omniArenaTickets: Ticket[];
   loading: boolean;
   error: string | null;
   weekStartDate: string;
-  rollupReferenceDate: string;
   onWeekStartDateChange: (value: string) => void;
-  onRollupReferenceDateChange: (value: string) => void;
   onRefresh: () => Promise<void>;
   onRefreshReceivedRollup: () => Promise<void>;
   onCopySummary: () => Promise<void>;
-  onCopyReceivedRollupSummary: () => Promise<void>;
   dispatchPreview: string | null;
   dispatchLoading: boolean;
   onPreviewDispatch: () => Promise<void>;
   onSendDispatch: () => Promise<void>;
   onClearDispatchPreview: () => void;
-  onTrackEvent?: (eventName: string, metadata?: Record<string, unknown>) => void;
 }) {
   const labels: Record<string, string> = {
     total: "Total",
     omni_one: "Omni One",
     omni_arena: "Omni Arena",
     other: "Other Brands",
-  };
-  const periodLabels: Record<string, string> = {
-    month: "Monthly",
-    quarter: "Quarterly",
-    year: "Yearly",
   };
 
   const sortedRows = useMemo(() => {
@@ -1851,134 +1553,70 @@ function ReportsPane({
     ? `${formatDateShort(previousTotalRow.period_start_date)} - ${formatDateShort(previousTotalRow.period_end_date)}`
     : null;
 
+  const summaryRows = useMemo(() => {
+    const order = ["total", "omni_one", "omni_arena"];
+
+    return order
+      .map((brand) => {
+        const current = sortedRows.find((row) => row.brand === brand) || null;
+        if (!current) return null;
+
+        const previous = previousRowsByBrand.get(brand) || null;
+        return {
+          brand,
+          current,
+          previous,
+          delta: previous ? current.received_count - previous.received_count : null,
+        };
+      })
+      .filter((row): row is {
+        brand: string;
+        current: WeeklyTicketReportRow;
+        previous: WeeklyTicketReportRow | null;
+        delta: number | null;
+      } => row !== null);
+  }, [sortedRows, previousRowsByBrand]);
+
+  const periodLabels: Record<string, string> = {
+    month: "Monthly",
+    quarter: "Quarterly",
+    year: "Yearly",
+  };
   const orderedPeriods = ["month", "quarter", "year"];
-  const orderedBrands = ["total", "omni_one", "omni_arena", "other"];
+  const orderedRollupBrands = ["total", "omni_one", "omni_arena"];
   const receivedRollupMap = useMemo(() => {
     return new Map(receivedRollupRows.map((row) => [`${row.period_type}:${row.brand}`, row]));
   }, [receivedRollupRows]);
-
   const receivedRollupTotals = useMemo(() => {
     return orderedPeriods
       .map((period) => receivedRollupMap.get(`${period}:total`) || null)
       .filter((row): row is TicketReceivedRollupRow => row !== null);
   }, [receivedRollupMap]);
-  const [activeWeeklyBrand, setActiveWeeklyBrand] = useState<string>("total");
-  const [activeRollupPeriod, setActiveRollupPeriod] = useState<string>("month");
-  const [sqlImportInput, setSqlImportInput] = useState("");
-  const [sqlImportReport, setSqlImportReport] = useState<ImportedSqlReport | null>(null);
-  const [sqlImportError, setSqlImportError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (sortedRows.length === 0) return;
-    if (!sortedRows.some((row) => row.brand === activeWeeklyBrand)) {
-      setActiveWeeklyBrand(sortedRows[0].brand);
-    }
-  }, [activeWeeklyBrand, sortedRows]);
+  const omniOneOpenPendingTickets = useMemo(() => getOpenPendingTickets(omniOneTickets), [omniOneTickets]);
+  const omniArenaOpenPendingTickets = useMemo(() => getOpenPendingTickets(omniArenaTickets), [omniArenaTickets]);
+  const omniOneBacklogCounts = useMemo(
+    () => getOpenPendingStatusCounts(omniOneOpenPendingTickets),
+    [omniOneOpenPendingTickets],
+  );
+  const omniArenaBacklogCounts = useMemo(
+    () => getOpenPendingStatusCounts(omniArenaOpenPendingTickets),
+    [omniArenaOpenPendingTickets],
+  );
+  const totalBacklogCount = omniOneBacklogCounts.total + omniArenaBacklogCounts.total;
 
-  useEffect(() => {
-    if (receivedRollupTotals.length === 0) return;
-    if (!receivedRollupTotals.some((row) => row.period_type === activeRollupPeriod)) {
-      setActiveRollupPeriod(receivedRollupTotals[0].period_type);
-    }
-  }, [activeRollupPeriod, receivedRollupTotals]);
-
-  function handleGenerateImportedSqlReport() {
-    setSqlImportError(null);
-
-    try {
-      const parsed = parseImportedVenueRows(sqlImportInput);
-      const report = buildImportedSqlReport(parsed.rows, parsed.skippedRows);
-      setSqlImportReport(report);
-      onTrackEvent?.("sql_import_report_generated", {
-        parsed_rows: parsed.rowCount,
-        skipped_rows: parsed.skippedRows,
-        venue_count: report.venueCount,
-        total_plays: report.totalPlays,
-        unique_players: report.totalUniquePlayers,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to parse imported SQL rows.";
-      setSqlImportReport(null);
-      setSqlImportError(message);
-      onTrackEvent?.("sql_import_report_failed", { message });
-    }
-  }
-
-  async function handleCopyImportedSqlSummary() {
-    if (!sqlImportReport) return;
-
-    try {
-      await navigator.clipboard.writeText(buildImportedSqlSummary(sqlImportReport));
-      onTrackEvent?.("sql_import_summary_copied", {
-        venue_count: sqlImportReport.venueCount,
-        total_plays: sqlImportReport.totalPlays,
-      });
-    } catch {
-      // no-op, caller UI already communicates clipboard failures elsewhere
-    }
-  }
-
-  const coverageStartDate = coverage?.earliest_created_at?.slice(0, 10) || null;
-  const coverageEndDate = coverage?.latest_created_at?.slice(0, 10) || null;
-  const weeklyBeforeCoverage = coverageStartDate ? weekStartDate < coverageStartDate : false;
-  const weeklyAfterCoverage = coverageEndDate ? weekStartDate > coverageEndDate : false;
-  const rollupBeforeCoverage = coverageStartDate ? rollupReferenceDate < coverageStartDate : false;
-  const rollupAfterCoverage = coverageEndDate ? rollupReferenceDate > coverageEndDate : false;
+  const omniOneTopThemes = useMemo(() => getTopTicketThemes(omniOneOpenPendingTickets, 3), [omniOneOpenPendingTickets]);
+  const omniArenaTopThemes = useMemo(() => getTopTicketThemes(omniArenaOpenPendingTickets, 3), [omniArenaOpenPendingTickets]);
+  const omniArenaTopCallers = useMemo(() => getTopTicketRequesters(omniArenaOpenPendingTickets, 5), [omniArenaOpenPendingTickets]);
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
-      <div className="surface-panel p-5 space-y-4">
+    <section className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
+      <div className="surface-panel space-y-4 p-5">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Weekly Ticket Report</h2>
+          <h2 className="text-xl font-semibold tracking-tight">High-Impact Ticket Report</h2>
           <p className="mt-1 text-[13px] leading-6 text-muted-foreground">
-            Received vs solved/closed vs still open. Spam/deleted tickets are excluded.
+            Simplified for weekly execution: intake trend, active backlog, top issues, and top Omni Arena callers.
           </p>
-        </div>
-
-        <div className="surface-panel-soft p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Data Coverage</p>
-          {coverageLoading ? <p className="mt-2 text-[13px] text-muted-foreground">Checking coverage...</p> : null}
-          {!coverageLoading && coverageError ? <p className="mt-2 text-[13px] text-destructive">{coverageError}</p> : null}
-          {!coverageLoading && !coverageError && coverage ? (
-            <div className="mt-2 space-y-1.5 text-[13px] leading-5">
-              <p>
-                Range: {coverage.earliest_created_at ? formatDateShort(coverage.earliest_created_at) : "-"} to{" "}
-                {coverage.latest_created_at ? formatDateShort(coverage.latest_created_at) : "-"}
-              </p>
-              <p className="text-muted-foreground">
-                {coverage.tickets_with_created_at} tickets with created date, {coverage.tickets_missing_created_at} missing created date.
-              </p>
-              {coverage.latest_sync_status ? (
-                <p className="text-muted-foreground">
-                  Latest sync: {coverage.latest_sync_status}
-                  {coverage.latest_sync_finished_at ? ` at ${formatDateTime(coverage.latest_sync_finished_at)}` : ""}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="surface-panel-soft p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Hub Analytics (Last 14 Days)</p>
-          {analyticsBaselineLoading ? <p className="mt-2 text-[13px] text-muted-foreground">Loading baseline metrics...</p> : null}
-          {!analyticsBaselineLoading && analyticsBaselineError ? (
-            <p className="mt-2 text-[13px] text-destructive">{analyticsBaselineError}</p>
-          ) : null}
-          {!analyticsBaselineLoading && !analyticsBaselineError && analyticsBaseline ? (
-            <div className="mt-2 space-y-1.5 text-[13px] leading-5">
-              <p>
-                Window: {formatDateShort(analyticsBaseline.period_start_date)} - {formatDateShort(analyticsBaseline.period_end_date)}
-              </p>
-              <p className="text-muted-foreground">{analyticsBaseline.total_events} events from {analyticsBaseline.unique_users} active users.</p>
-              <p className="text-muted-foreground">
-                Copilot queries: {analyticsBaseline.copilot_queries} | Citation clicks: {analyticsBaseline.citation_clicks}
-              </p>
-              <p className="text-muted-foreground">
-                Weekly refreshes: {analyticsBaseline.weekly_reports_refreshed} | M/Q/Y refreshes: {analyticsBaseline.rollup_reports_refreshed}
-              </p>
-              <p className="text-muted-foreground">SQL reports generated: {analyticsBaseline.sql_reports_generated}</p>
-            </div>
-          ) : null}
         </div>
 
         <div className="surface-panel-soft space-y-2 p-3">
@@ -2000,6 +1638,16 @@ function ReportsPane({
             Refresh Report
           </Button>
           <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => void onRefreshReceivedRollup()}
+            disabled={receivedRollupLoading}
+          >
+            {receivedRollupLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Refresh M/Q/Y View
+          </Button>
+          <Button
             variant="secondary"
             size="sm"
             className="w-full"
@@ -2007,80 +1655,8 @@ function ReportsPane({
             disabled={loading || sortedRows.length === 0}
           >
             <Copy className="mr-2 h-4 w-4" />
-            Copy Weekly Summary
+            Copy Report Summary
           </Button>
-          {weeklyBeforeCoverage ? (
-            <p className="text-[12px] leading-5 text-amber-500">
-              Selected week starts before available data ({coverageStartDate}).
-            </p>
-          ) : null}
-          {weeklyAfterCoverage ? (
-            <p className="text-[12px] leading-5 text-amber-500">
-              Selected week starts after latest available ticket date ({coverageEndDate}).
-            </p>
-          ) : null}
-        </div>
-
-        <div className="surface-panel-soft p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Period</p>
-          <p className="mt-1 text-[15px] font-medium">{periodLabel || "-"}</p>
-          {previousPeriodLabel ? (
-            <p className="mt-1 text-[12px] text-muted-foreground">Compared to: {previousPeriodLabel}</p>
-          ) : null}
-          {totalRow ? (
-            <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-              {totalRow.received_count} received, {totalRow.solved_closed_count} solved/closed, {totalRow.still_open_count} still open.
-            </p>
-          ) : null}
-        </div>
-
-        <div className="surface-panel-soft space-y-2 p-3">
-          <label htmlFor="rollup-reference-date" className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Intake Search Date
-          </label>
-          <div className="relative">
-            <Input
-              id="rollup-reference-date"
-              type="date"
-              value={rollupReferenceDate}
-              onChange={(event) => onRollupReferenceDateChange(event.target.value)}
-              className="report-date-input pr-10"
-            />
-            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary/85" />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => void onRefreshReceivedRollup()}
-            disabled={receivedRollupLoading}
-          >
-            {receivedRollupLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-            Refresh M/Q/Y Search
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="w-full"
-            onClick={() => void onCopyReceivedRollupSummary()}
-            disabled={receivedRollupLoading || receivedRollupRows.length === 0}
-          >
-            <Copy className="mr-2 h-4 w-4" />
-            Copy M/Q/Y Summary
-          </Button>
-          <p className="text-[12px] leading-5 text-muted-foreground">
-            Returns ticket intake counts for current month, quarter, and year anchored to this date.
-          </p>
-          {rollupBeforeCoverage ? (
-            <p className="text-[12px] leading-5 text-amber-500">
-              Reference date is before available data ({coverageStartDate}).
-            </p>
-          ) : null}
-          {rollupAfterCoverage ? (
-            <p className="text-[12px] leading-5 text-amber-500">
-              Reference date is after latest available ticket date ({coverageEndDate}).
-            </p>
-          ) : null}
         </div>
 
         <div className="surface-panel-soft space-y-2 p-3">
@@ -2116,264 +1692,105 @@ function ReportsPane({
           <p className="text-sm text-destructive">{error}</p>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4">
-              {sortedRows.map((row) => (
-                (() => {
-                  const previous = previousRowsByBrand.get(row.brand);
-                  const receivedDelta = previous ? row.received_count - previous.received_count : null;
-                  const solvedDelta = previous ? row.solved_closed_count - previous.solved_closed_count : null;
-                  const openDelta = previous ? row.still_open_count - previous.still_open_count : null;
-                  const rateDelta = previous ? row.resolution_rate - previous.resolution_rate : null;
+            <div className="surface-panel-soft p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Report Window</p>
+              <p className="mt-1 text-[15px] font-medium">{periodLabel || "-"}</p>
+              {previousPeriodLabel ? (
+                <p className="mt-1 text-[12px] text-muted-foreground">Compared against: {previousPeriodLabel}</p>
+              ) : null}
+              {totalRow ? (
+                <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
+                  Weekly intake snapshot: {totalRow.received_count} tickets received across all brands.
+                </p>
+              ) : null}
+            </div>
 
-                  return (
-                    <button
-                      key={row.brand}
-                      type="button"
-                      onClick={() => setActiveWeeklyBrand(row.brand)}
-                      className={[
-                        "rounded-xl border p-4 text-left transition-all duration-200",
-                        "bg-gradient-to-br",
-                        getWeeklyCardToneClass(row.brand),
-                        activeWeeklyBrand === row.brand
-                          ? "border-primary/75 bg-primary/12 shadow-[0_18px_36px_-24px_hsl(var(--primary)/0.98)] ring-1 ring-primary/45"
-                          : "border-border/65 hover:-translate-y-0.5 hover:border-primary/70 hover:shadow-[0_16px_34px_-24px_hsl(var(--primary)/0.92)]",
-                      ].join(" ")}
-                      aria-pressed={activeWeeklyBrand === row.brand}
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                        {labels[row.brand] ?? row.brand}
-                      </p>
-                      <p className="mt-2 text-3xl font-semibold tracking-tight">{row.received_count}</p>
-                      <p className="text-[12px] text-muted-foreground">received</p>
-                      {previous ? (
-                        <p className="mt-1 text-[12px] text-muted-foreground">
-                          Prev {previous.received_count} ({formatSignedIntDelta(receivedDelta ?? 0)} WoW)
-                        </p>
-                      ) : null}
-                      <div className="mt-3 space-y-1.5 text-[13px]">
-                        <p>
-                          <span className="text-muted-foreground">Solved/Closed:</span>{" "}
-                          <span className="font-medium">{row.solved_closed_count}</span>
-                          {previous ? (
-                            <span className="text-muted-foreground"> ({formatSignedIntDelta(solvedDelta ?? 0)} WoW)</span>
-                          ) : null}
-                        </p>
-                        <p>
-                          <span className="text-muted-foreground">Still Open:</span>{" "}
-                          <span className="font-medium">{row.still_open_count}</span>
-                          {previous ? (
-                            <span className="text-muted-foreground"> ({formatSignedIntDelta(openDelta ?? 0)} WoW)</span>
-                          ) : null}
-                        </p>
-                        <p>
-                          <span className="text-muted-foreground">Resolution Rate:</span>{" "}
-                          <span className="font-medium">{(row.resolution_rate * 100).toFixed(1)}%</span>
-                          {previous ? (
-                            <span className="text-muted-foreground"> ({formatSignedRateDelta(rateDelta ?? 0)} WoW)</span>
-                          ) : null}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })()
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {summaryRows.map(({ brand, current, previous, delta }) => (
+                <article
+                  key={`summary-card-${brand}`}
+                  className={[
+                    "rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_-24px_hsl(var(--primary)/0.92)]",
+                    brand === "total"
+                      ? "border-primary/45 bg-primary/[0.12] hover:border-primary/70"
+                      : "border-border/65 bg-background/55 hover:border-primary/55 hover:bg-background/65",
+                  ].join(" ")}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {labels[brand] ?? brand}
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight">{current.received_count}</p>
+                  <p className="text-[12px] text-muted-foreground">Tickets received</p>
+                  <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                    WoW: {delta === null ? "n/a" : formatSignedIntDelta(delta)}
+                    {previous ? ` (Prev ${previous.received_count})` : ""}
+                  </p>
+                </article>
               ))}
             </div>
 
-            <div className="space-y-2 lg:hidden">
-              {sortedRows.map((row) => {
-                const previous = previousRowsByBrand.get(row.brand);
-                return (
-                  <article
-                    key={`mobile-weekly-${row.brand}`}
-                    className={[
-                      "surface-panel-soft space-y-2 p-4",
-                      activeWeeklyBrand === row.brand ? "border-primary/45 bg-primary/[0.11]" : "",
-                    ].join(" ")}
-                  >
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                      {labels[row.brand] ?? row.brand}
-                    </p>
-                    <p className="text-2xl font-semibold tracking-tight">{row.received_count}</p>
-                    <div className="space-y-1 text-[13px] leading-5 text-muted-foreground">
-                      <p>Solved/Closed: <span className="font-medium text-foreground">{row.solved_closed_count}</span></p>
-                      <p>Still Open: <span className="font-medium text-foreground">{row.still_open_count}</span></p>
-                      <p>Resolution Rate: <span className="font-medium text-foreground">{(row.resolution_rate * 100).toFixed(1)}%</span></p>
-                      <p>
-                        WoW Received:{" "}
-                        <span className="font-medium text-foreground">
-                          {previous ? formatSignedIntDelta(row.received_count - previous.received_count) : "-"}
-                        </span>
-                      </p>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-
-            <div className="table-shell hidden lg:block">
-              <table className="w-full text-[14px] md:text-[15px]">
-                <thead className="bg-muted/55">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Brand</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Received</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Received</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Solved/Closed</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Solved</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Still Open</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Open</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Resolution Rate</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">WoW Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRows.map((row) => {
-                    const previous = previousRowsByBrand.get(row.brand);
-                    return (
-                      <tr
-                        key={`table-${row.brand}`}
-                        className={[
-                          "border-t border-border/35 transition-colors",
-                          activeWeeklyBrand === row.brand ? "bg-primary/10" : "",
-                        ].join(" ")}
-                      >
-                        <td className="px-4 py-3 font-medium">{labels[row.brand] ?? row.brand}</td>
-                        <td className="px-4 py-3">{row.received_count}</td>
-                        <td className="px-4 py-3">{previous ? formatSignedIntDelta(row.received_count - previous.received_count) : "-"}</td>
-                        <td className="px-4 py-3">{row.solved_closed_count}</td>
-                        <td className="px-4 py-3">{previous ? formatSignedIntDelta(row.solved_closed_count - previous.solved_closed_count) : "-"}</td>
-                        <td className="px-4 py-3">{row.still_open_count}</td>
-                        <td className="px-4 py-3">{previous ? formatSignedIntDelta(row.still_open_count - previous.still_open_count) : "-"}</td>
-                        <td className="px-4 py-3">{(row.resolution_rate * 100).toFixed(1)}%</td>
-                        <td className="px-4 py-3">{previous ? formatSignedRateDelta(row.resolution_rate - previous.resolution_rate) : "-"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="surface-panel-soft space-y-4 p-4">
+            <article className="surface-panel-soft space-y-3 p-4">
               <div>
-                <h3 className="text-lg font-semibold tracking-tight">Ticket Intake Search (M/Q/Y)</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Monthly / Quarterly / Yearly Intake</h3>
                 <p className="text-[12px] leading-5 text-muted-foreground">
-                  Received tickets only, excluding spam/deleted, with previous-period comparison.
+                  Snapshot by current reference date, with previous-period comparison.
                 </p>
               </div>
 
               {receivedRollupLoading ? (
-                <p className="text-sm text-muted-foreground">Loading monthly/quarterly/yearly intake...</p>
+                <p className="text-[13px] text-muted-foreground">Loading intake view...</p>
               ) : receivedRollupError ? (
-                <p className="text-sm text-destructive">{receivedRollupError}</p>
+                <p className="text-[13px] text-destructive">{receivedRollupError}</p>
+              ) : receivedRollupTotals.length === 0 ? (
+                <p className="text-[13px] text-muted-foreground">No monthly/quarterly/yearly data available yet.</p>
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-3">
                     {receivedRollupTotals.map((row) => (
-                      <button
-                        key={`rollup-card-${row.period_type}`}
-                        type="button"
-                        onClick={() => setActiveRollupPeriod(row.period_type)}
-                        className={[
-                          "w-full rounded-xl border p-4 text-left transition-all duration-200",
-                          "bg-gradient-to-br",
-                          getRollupCardToneClass(row.period_type),
-                          activeRollupPeriod === row.period_type
-                            ? "border-primary/75 bg-primary/12 shadow-[0_18px_36px_-24px_hsl(var(--primary)/0.98)] ring-1 ring-primary/45"
-                            : "border-border/65 hover:-translate-y-0.5 hover:border-primary/70 hover:shadow-[0_16px_34px_-24px_hsl(var(--primary)/0.92)]",
-                        ].join(" ")}
-                        aria-pressed={activeRollupPeriod === row.period_type}
+                      <div
+                        key={`rollup-total-${row.period_type}`}
+                        className="rounded-lg border border-border/65 bg-background/55 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/55 hover:bg-background/65 hover:shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]"
                       >
                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                           {periodLabels[row.period_type] ?? row.period_type}
                         </p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight">{row.received_count}</p>
+                        <p className="mt-1 text-2xl font-semibold tracking-tight">{row.received_count}</p>
                         <p className="text-[12px] text-muted-foreground">
-                          {formatDateShort(row.period_start_date)} - {formatDateShort(row.period_end_date)}
+                          Prev {row.previous_received_count} ({formatSignedIntDelta(row.delta)} / {formatSignedPercentDelta(row.delta_pct)})
                         </p>
-                        <p className="mt-2 text-[12px] text-muted-foreground">
-                          Prev {row.previous_received_count} ({formatSignedIntDelta(row.delta)} / {formatPercentDelta(row.delta_pct)} )
-                        </p>
-                      </button>
+                      </div>
                     ))}
                   </div>
 
-                  <div className="space-y-2 lg:hidden">
-                    {orderedBrands.map((brand) => (
-                      <article key={`rollup-mobile-${brand}`} className="surface-panel-soft p-4">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                          {labels[brand] ?? brand}
-                        </p>
-                        <div className="mt-2 grid grid-cols-3 gap-2">
-                          {orderedPeriods.map((period) => {
-                            const row = receivedRollupMap.get(`${period}:${brand}`) || null;
-                            return (
-                              <div
-                                key={`rollup-mobile-cell-${brand}-${period}`}
-                                className={[
-                                  "rounded-lg border border-border/65 bg-background/50 px-2 py-2 text-[12px]",
-                                  activeRollupPeriod === period ? "border-primary/45 bg-primary/[0.1]" : "",
-                                ].join(" ")}
-                              >
-                                <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
-                                  {periodLabels[period] ?? period}
-                                </p>
-                                {row ? (
-                                  <>
-                                    <p className="mt-1 font-semibold text-foreground">{row.received_count}</p>
-                                    <p className="text-[11px] leading-4 text-muted-foreground">
-                                      {formatSignedIntDelta(row.delta)} / {formatPercentDelta(row.delta_pct)}
-                                    </p>
-                                  </>
-                                ) : (
-                                  <p className="mt-1 text-muted-foreground">-</p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="table-shell hidden lg:block">
-                    <table className="w-full text-[14px] md:text-[15px]">
+                  <div className="table-shell">
+                    <table className="w-full text-[13px] md:text-[14px]">
                       <thead className="bg-muted/55">
                         <tr>
-                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Brand</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Brand</th>
                           {orderedPeriods.map((period) => (
-                            <th
-                              key={`rollup-head-${period}`}
-                              className={[
-                                "px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
-                                activeRollupPeriod === period ? "bg-primary/12 text-primary" : "",
-                              ].join(" ")}
-                            >
+                            <th key={`rollup-period-${period}`} className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                               {periodLabels[period] ?? period}
                             </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {orderedBrands.map((brand) => (
-                          <tr key={`rollup-row-${brand}`} className="border-t border-border/35">
-                            <td className="px-4 py-3 font-medium">{labels[brand] ?? brand}</td>
+                        {orderedRollupBrands.map((brand) => (
+                          <tr key={`rollup-brand-row-${brand}`} className="border-t border-border/35">
+                            <td className="px-3 py-2 font-medium">{labels[brand] ?? brand}</td>
                             {orderedPeriods.map((period) => {
                               const row = receivedRollupMap.get(`${period}:${brand}`) || null;
                               return (
-                                <td key={`rollup-cell-${brand}-${period}`} className="px-4 py-3">
+                                <td key={`rollup-brand-cell-${brand}-${period}`} className="px-3 py-2 align-top">
                                   {row ? (
-                                    <div
-                                      className={[
-                                        "rounded-md px-2 py-1.5 leading-5 transition-colors",
-                                        activeRollupPeriod === period ? "bg-primary/10" : "",
-                                      ].join(" ")}
-                                    >
-                                      <p>{row.received_count}</p>
-                                      <p className="text-[12px] text-muted-foreground">
-                                        {formatSignedIntDelta(row.delta)} / {formatPercentDelta(row.delta_pct)}
+                                    <div className="leading-5">
+                                      <p className="font-medium">{row.received_count}</p>
+                                      <p className="text-[11px] text-muted-foreground">
+                                        {formatSignedIntDelta(row.delta)} / {formatSignedPercentDelta(row.delta_pct)}
                                       </p>
                                     </div>
                                   ) : (
-                                    "-"
+                                    <p className="text-muted-foreground">-</p>
                                   )}
                                 </td>
                               );
@@ -2385,116 +1802,107 @@ function ReportsPane({
                   </div>
                 </>
               )}
+            </article>
+
+            <div className="grid items-stretch gap-4 xl:grid-cols-2">
+              <article className="surface-panel-soft h-full space-y-3 p-4">
+                <div>
+                  <h3 className="text-lg font-semibold tracking-tight">Currently Open Tickets</h3>
+                  <p className="text-[12px] leading-5 text-muted-foreground">Open + Pending queue only.</p>
+                </div>
+                <p className="text-2xl font-semibold tracking-tight">{totalBacklogCount}</p>
+                <p className="text-[12px] text-muted-foreground">Total active tickets (Omni One + Omni Arena)</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-border/65 bg-background/55 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/55 hover:bg-background/65 hover:shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni One</p>
+                    <p className="mt-1 text-xl font-semibold">{omniOneBacklogCounts.total}</p>
+                    <p className="text-[12px] text-muted-foreground">
+                      Open {omniOneBacklogCounts.open} • Pending {omniOneBacklogCounts.pending}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border/65 bg-background/55 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/55 hover:bg-background/65 hover:shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni Arena</p>
+                    <p className="mt-1 text-xl font-semibold">{omniArenaBacklogCounts.total}</p>
+                    <p className="text-[12px] text-muted-foreground">
+                      Open {omniArenaBacklogCounts.open} • Pending {omniArenaBacklogCounts.pending}
+                    </p>
+                  </div>
+                </div>
+              </article>
+
+              <article className="surface-panel-soft h-full space-y-3 p-4">
+                <div>
+                  <h3 className="text-lg font-semibold tracking-tight">Top Issue Themes</h3>
+                  <p className="text-[12px] leading-5 text-muted-foreground">Top 3 from active queue subjects.</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr">
+                  <div className="h-full rounded-lg border border-border/65 bg-background/55 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni One</p>
+                    {omniOneTopThemes.length === 0 ? (
+                      <p className="mt-2 text-[13px] text-muted-foreground">No active tickets.</p>
+                    ) : (
+                      <ol className="mt-2 space-y-1.5">
+                        {omniOneTopThemes.map((entry) => (
+                          <li key={`omni-one-theme-${entry.label}`} className="text-[13px] leading-5">
+                            <span className="font-medium">{entry.label}</span>
+                            <span className="text-muted-foreground"> ({entry.count})</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+
+                  <div className="h-full rounded-lg border border-border/65 bg-background/55 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni Arena</p>
+                    {omniArenaTopThemes.length === 0 ? (
+                      <p className="mt-2 text-[13px] text-muted-foreground">No active tickets.</p>
+                    ) : (
+                      <ol className="mt-2 space-y-1.5">
+                        {omniArenaTopThemes.map((entry) => (
+                          <li key={`omni-arena-theme-${entry.label}`} className="text-[13px] leading-5">
+                            <span className="font-medium">{entry.label}</span>
+                            <span className="text-muted-foreground"> ({entry.count})</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                </div>
+              </article>
             </div>
 
-            <div className="surface-panel-soft space-y-4 p-4">
+            <article className="surface-panel-soft space-y-3 p-4">
               <div>
-                <h3 className="text-lg font-semibold tracking-tight">SQL Import Report Builder</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Top Omni Arena Callers / Venues</h3>
                 <p className="text-[12px] leading-5 text-muted-foreground">
-                  Paste HeidiSQL rows (CSV/TSV) with `Venue`, `Total_Plays`, and `Unique_Players` to generate a management-ready summary.
+                  Top requesters in the current Omni Arena open + pending queue.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="sql-import-input" className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  SQL Export Rows
-                </label>
-                <Textarea
-                  id="sql-import-input"
-                  value={sqlImportInput}
-                  onChange={(event) => setSqlImportInput(event.target.value)}
-                  placeholder={"Venue\tTotal_Plays\tUnique_Players\nJake's Unlimited - Mesa\t1975\t294"}
-                  className="min-h-[160px] resize-y bg-background/55"
-                />
-              </div>
+              {omniArenaTopCallers.length === 0 ? (
+                <p className="text-[13px] text-muted-foreground">No active Omni Arena tickets.</p>
+              ) : (
+                <ol className="grid gap-2 sm:grid-cols-2">
+                  {omniArenaTopCallers.map((entry, index) => (
+                    <li
+                      key={`oa-caller-${entry.label}`}
+                      className={[
+                        "rounded-lg border border-border/65 bg-background/55 px-3 py-2 text-[13px]",
+                        "transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/55 hover:bg-background/65 hover:shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]",
+                        omniArenaTopCallers.length % 2 === 1 && index === omniArenaTopCallers.length - 1 ? "sm:col-span-2" : "",
+                      ].join(" ")}
+                    >
+                      <span className="font-medium">{index + 1}. {entry.label}</span>
+                      <span className="text-muted-foreground"> ({entry.count})</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
 
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={handleGenerateImportedSqlReport}>
-                  <FileText className="mr-2 h-4 w-4" />
-                  Generate Imported Report
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleCopyImportedSqlSummary()}
-                  disabled={!sqlImportReport}
-                >
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy Imported Summary
-                </Button>
-              </div>
-
-              {sqlImportError ? <p className="text-sm text-destructive">{sqlImportError}</p> : null}
-
-              {sqlImportReport ? (
-                <>
-                  <p className="text-[12px] text-muted-foreground">
-                    Parsed {sqlImportReport.totalParsedRows} venue rows.
-                    {sqlImportReport.skippedRows > 0 ? ` ${sqlImportReport.skippedRows} rows were skipped due to missing/invalid values.` : ""}
-                  </p>
-
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {sqlImportReport.metricSummaries.map((metric) => (
-                      <div
-                        key={`sql-metric-${metric.key}`}
-                        className={[
-                          "rounded-xl border p-4 text-left transition-all duration-200",
-                          "bg-gradient-to-br",
-                          getSqlImportMetricToneClass(metric.key),
-                          "border-border/65 hover:-translate-y-0.5 hover:border-primary/70 hover:shadow-[0_16px_34px_-24px_hsl(var(--primary)/0.92)]",
-                        ].join(" ")}
-                      >
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                          {metric.label}
-                        </p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight">{formatMetricValue(metric)}</p>
-                        <p className="mt-1 text-[12px] text-muted-foreground">{metric.subtitle}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-2 lg:hidden">
-                    {sqlImportReport.topVenues.map((venue, index) => (
-                      <article key={`sql-mobile-${index}-${venue.venue}`} className="surface-panel-soft p-4">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold">{index + 1}. {venue.venue}</p>
-                          <span className="brand-chip">P/P {formatDecimalValue(venue.playsPerPlayer)}</span>
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-muted-foreground">
-                          <p>Total Plays: <span className="font-medium text-foreground">{Math.round(venue.totalPlays).toLocaleString()}</span></p>
-                          <p>Unique Players: <span className="font-medium text-foreground">{Math.round(venue.uniquePlayers).toLocaleString()}</span></p>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="table-shell hidden lg:block">
-                    <table className="w-full text-[14px] md:text-[15px]">
-                      <thead className="bg-muted/55">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">#</th>
-                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Venue</th>
-                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Total Plays</th>
-                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Unique Players</th>
-                          <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Plays / Player</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sqlImportReport.topVenues.map((venue, index) => (
-                          <tr key={`sql-venue-${index}-${venue.venue}`} className="border-t border-border/35">
-                            <td className="px-4 py-3">{index + 1}</td>
-                            <td className="px-4 py-3 font-medium">{venue.venue}</td>
-                            <td className="px-4 py-3">{Math.round(venue.totalPlays).toLocaleString()}</td>
-                            <td className="px-4 py-3">{Math.round(venue.uniquePlayers).toLocaleString()}</td>
-                            <td className="px-4 py-3">{formatDecimalValue(venue.playsPerPlayer)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : null}
-            </div>
+              <p className="text-[11px] text-muted-foreground">
+                Queue metrics are based on the current cached ticket set in Hub.
+              </p>
+            </article>
           </>
         )}
       </div>
@@ -2571,13 +1979,6 @@ export default function Hub() {
   const [receivedRollupRows, setReceivedRollupRows] = useState<TicketReceivedRollupRow[]>([]);
   const [receivedRollupLoading, setReceivedRollupLoading] = useState(false);
   const [receivedRollupError, setReceivedRollupError] = useState<string | null>(null);
-  const [receivedRollupReferenceDate, setReceivedRollupReferenceDate] = useState(() => toIsoDateOnly(new Date()));
-  const [ticketDataCoverage, setTicketDataCoverage] = useState<TicketDataCoverageRow | null>(null);
-  const [ticketDataCoverageLoading, setTicketDataCoverageLoading] = useState(false);
-  const [ticketDataCoverageError, setTicketDataCoverageError] = useState<string | null>(null);
-  const [hubAnalyticsBaseline, setHubAnalyticsBaseline] = useState<HubAnalyticsBaselineRow | null>(null);
-  const [hubAnalyticsBaselineLoading, setHubAnalyticsBaselineLoading] = useState(false);
-  const [hubAnalyticsBaselineError, setHubAnalyticsBaselineError] = useState<string | null>(null);
   const [weeklyDispatchLoading, setWeeklyDispatchLoading] = useState(false);
   const [weeklyDispatchPreview, setWeeklyDispatchPreview] = useState<string | null>(null);
 
@@ -2872,6 +2273,43 @@ export default function Hub() {
     }
   }
 
+  async function refreshReceivedRollup() {
+    setReceivedRollupLoading(true);
+    setReceivedRollupError(null);
+
+    try {
+      const referenceDate = toIsoDateOnly(new Date());
+      const { data, error } = await supabase.rpc("get_ticket_received_rollup", {
+        reference_date: referenceDate,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const rows = ((data || []) as TicketReceivedRollupRow[]).map((row) => ({
+        ...row,
+        received_count: Number(row.received_count || 0),
+        previous_received_count: Number(row.previous_received_count || 0),
+        delta: Number(row.delta || 0),
+        delta_pct: row.delta_pct === null ? null : Number(row.delta_pct),
+      }));
+
+      setReceivedRollupRows(rows);
+      void trackHubEvent("received_rollup_refreshed", {
+        reference_date: referenceDate,
+        rows: rows.length,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load monthly/quarterly/yearly intake.";
+      setReceivedRollupError(message);
+      setReceivedRollupRows([]);
+      void trackHubEvent("received_rollup_refresh_failed", { message });
+    } finally {
+      setReceivedRollupLoading(false);
+    }
+  }
+
   async function handleCopyWeeklySummary() {
     if (weeklyReportRows.length === 0) {
       toast({ title: "No report data", description: "Load a report first.", variant: "destructive" });
@@ -2903,198 +2341,70 @@ export default function Hub() {
       );
     }
 
-    lines.push("Spam/deleted tickets excluded.");
+    lines.push("High-impact summary only.");
     lines.push("");
 
-    orderedBrands.forEach((brand) => {
+    lines.push("Tickets Received (WoW)");
+    orderedBrands.filter((brand) => brand !== "other").forEach((brand) => {
       const current = currentByBrand.get(brand);
       if (!current) return;
-
       const previous = previousByBrand.get(brand);
       const receivedDelta = previous ? formatSignedIntDelta(current.received_count - previous.received_count) : "n/a";
-      const solvedDelta = previous ? formatSignedIntDelta(current.solved_closed_count - previous.solved_closed_count) : "n/a";
-      const openDelta = previous ? formatSignedIntDelta(current.still_open_count - previous.still_open_count) : "n/a";
-      const rateDelta = previous ? formatSignedRateDelta(current.resolution_rate - previous.resolution_rate) : "n/a";
-
-      lines.push(
-        `${labels[brand] ?? brand}: received ${current.received_count} (WoW ${receivedDelta}), solved/closed ${current.solved_closed_count} (WoW ${solvedDelta}), still open ${current.still_open_count} (WoW ${openDelta}), resolution ${(current.resolution_rate * 100).toFixed(1)}% (WoW ${rateDelta}).`,
-      );
+      lines.push(`${labels[brand] ?? brand}: ${current.received_count} received (WoW ${receivedDelta})`);
     });
+
+    const omniOneOpenPending = getOpenPendingTickets(omniOneTickets);
+    const omniArenaOpenPending = getOpenPendingTickets(omniArenaTickets);
+    const omniOneBacklogCounts = getOpenPendingStatusCounts(omniOneOpenPending);
+    const omniArenaBacklogCounts = getOpenPendingStatusCounts(omniArenaOpenPending);
+
+    lines.push("");
+    lines.push("Currently Open Tickets (Open + Pending)");
+    lines.push(
+      `Omni One: ${omniOneBacklogCounts.total} (Open ${omniOneBacklogCounts.open}, Pending ${omniOneBacklogCounts.pending})`,
+    );
+    lines.push(
+      `Omni Arena: ${omniArenaBacklogCounts.total} (Open ${omniArenaBacklogCounts.open}, Pending ${omniArenaBacklogCounts.pending})`,
+    );
+    lines.push(`Total Active: ${omniOneBacklogCounts.total + omniArenaBacklogCounts.total}`);
+
+    const omniOneThemes = getTopTicketThemes(omniOneOpenPending, 3);
+    const omniArenaThemes = getTopTicketThemes(omniArenaOpenPending, 3);
+    const topOmniArenaCallers = getTopTicketRequesters(omniArenaOpenPending, 5);
+
+    lines.push("");
+    lines.push("Top Issue Themes (Active Queue)");
+    lines.push(
+      `Omni One: ${
+        omniOneThemes.length > 0
+          ? omniOneThemes.map((entry) => `${entry.label} (${entry.count})`).join(", ")
+          : "No active tickets"
+      }`,
+    );
+    lines.push(
+      `Omni Arena: ${
+        omniArenaThemes.length > 0
+          ? omniArenaThemes.map((entry) => `${entry.label} (${entry.count})`).join(", ")
+          : "No active tickets"
+      }`,
+    );
+
+    lines.push("");
+    lines.push("Top Omni Arena Callers / Venues");
+    if (topOmniArenaCallers.length === 0) {
+      lines.push("No active Omni Arena tickets.");
+    } else {
+      topOmniArenaCallers.forEach((entry, index) => {
+        lines.push(`${index + 1}. ${entry.label} (${entry.count})`);
+      });
+    }
 
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
-      toast({ title: "Copied", description: "Weekly report summary copied." });
+      toast({ title: "Copied", description: "High-impact weekly summary copied." });
       void trackHubEvent("weekly_summary_copied", {
         start_date: weeklyReportStartDate,
         rows: weeklyReportRows.length,
-      });
-    } catch {
-      toast({ title: "Copy failed", description: "Clipboard is not available.", variant: "destructive" });
-    }
-  }
-
-  async function refreshReceivedRollup() {
-    setReceivedRollupLoading(true);
-    setReceivedRollupError(null);
-
-    try {
-      const { data, error } = await supabase.rpc("get_ticket_received_rollup", {
-        reference_date: receivedRollupReferenceDate || null,
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const rows = ((data || []) as TicketReceivedRollupRow[]).map((row) => ({
-        ...row,
-        received_count: Number(row.received_count || 0),
-        previous_received_count: Number(row.previous_received_count || 0),
-        delta: Number(row.delta || 0),
-        delta_pct: row.delta_pct === null ? null : Number(row.delta_pct),
-      }));
-
-      setReceivedRollupRows(rows);
-      void trackHubEvent("received_rollup_refreshed", {
-        reference_date: receivedRollupReferenceDate,
-        rows: rows.length,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load monthly/quarterly/yearly intake.";
-      setReceivedRollupError(message);
-      setReceivedRollupRows([]);
-      void trackHubEvent("received_rollup_refresh_failed", {
-        reference_date: receivedRollupReferenceDate,
-        message,
-      });
-    } finally {
-      setReceivedRollupLoading(false);
-    }
-  }
-
-  async function refreshTicketDataCoverage() {
-    setTicketDataCoverageLoading(true);
-    setTicketDataCoverageError(null);
-
-    try {
-      const { data, error } = await supabase.rpc("get_ticket_data_coverage");
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const row = Array.isArray(data) && data.length > 0 ? (data[0] as TicketDataCoverageRow) : null;
-      if (!row) {
-        setTicketDataCoverage(null);
-        return;
-      }
-
-      const latestSyncCursor = toOptionalNumber(row.latest_sync_cursor);
-
-      setTicketDataCoverage({
-        ...row,
-        total_tickets: Number(row.total_tickets || 0),
-        tickets_with_created_at: Number(row.tickets_with_created_at || 0),
-        tickets_missing_created_at: Number(row.tickets_missing_created_at || 0),
-        latest_sync_cursor: latestSyncCursor === null ? null : latestSyncCursor,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load ticket data coverage.";
-      setTicketDataCoverageError(message);
-      setTicketDataCoverage(null);
-    } finally {
-      setTicketDataCoverageLoading(false);
-    }
-  }
-
-  async function refreshHubAnalyticsBaseline() {
-    setHubAnalyticsBaselineLoading(true);
-    setHubAnalyticsBaselineError(null);
-
-    try {
-      const { data, error } = await supabase.rpc("get_hub_analytics_baseline", {
-        period_days: 14,
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const row = Array.isArray(data) && data.length > 0 ? data[0] as HubAnalyticsBaselineRow : null;
-      if (!row) {
-        setHubAnalyticsBaseline(null);
-        return;
-      }
-
-      setHubAnalyticsBaseline({
-        ...row,
-        total_events: Number(row.total_events || 0),
-        unique_users: Number(row.unique_users || 0),
-        copilot_queries: Number(row.copilot_queries || 0),
-        citation_clicks: Number(row.citation_clicks || 0),
-        weekly_reports_refreshed: Number(row.weekly_reports_refreshed || 0),
-        rollup_reports_refreshed: Number(row.rollup_reports_refreshed || 0),
-        sql_reports_generated: Number(row.sql_reports_generated || 0),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load hub analytics baseline.";
-      setHubAnalyticsBaselineError(message);
-      setHubAnalyticsBaseline(null);
-    } finally {
-      setHubAnalyticsBaselineLoading(false);
-    }
-  }
-
-  async function handleCopyReceivedRollupSummary() {
-    if (receivedRollupRows.length === 0) {
-      toast({ title: "No intake data", description: "Load the M/Q/Y search first.", variant: "destructive" });
-      return;
-    }
-
-    const labels: Record<string, string> = {
-      total: "Total",
-      omni_one: "Omni One",
-      omni_arena: "Omni Arena",
-      other: "Other Brands",
-    };
-    const periodLabels: Record<string, string> = {
-      month: "Monthly",
-      quarter: "Quarterly",
-      year: "Yearly",
-    };
-    const orderedPeriods = ["month", "quarter", "year"];
-    const orderedBrands = ["total", "omni_one", "omni_arena", "other"];
-    const byKey = new Map(receivedRollupRows.map((row) => [`${row.period_type}:${row.brand}`, row]));
-
-    const lines: string[] = [
-      `Ticket Intake Search Summary (reference date: ${formatDateShort(receivedRollupReferenceDate)})`,
-      "Spam/deleted tickets excluded.",
-      "",
-    ];
-
-    orderedPeriods.forEach((period) => {
-      const total = byKey.get(`${period}:total`);
-      if (!total) return;
-
-      lines.push(
-        `${periodLabels[period] ?? period} (${formatDateShort(total.period_start_date)} - ${formatDateShort(total.period_end_date)}): ${total.received_count} received, previous ${total.previous_received_count}, delta ${formatSignedIntDelta(total.delta)} (${formatPercentDelta(total.delta_pct)}).`,
-      );
-      orderedBrands.filter((brand) => brand !== "total").forEach((brand) => {
-        const row = byKey.get(`${period}:${brand}`);
-        if (!row) return;
-        lines.push(
-          `- ${labels[brand] ?? brand}: ${row.received_count} (prev ${row.previous_received_count}, delta ${formatSignedIntDelta(row.delta)} / ${formatPercentDelta(row.delta_pct)})`,
-        );
-      });
-      lines.push("");
-    });
-
-    try {
-      await navigator.clipboard.writeText(lines.join("\n").trim());
-      toast({ title: "Copied", description: "M/Q/Y intake summary copied." });
-      void trackHubEvent("received_rollup_summary_copied", {
-        reference_date: receivedRollupReferenceDate,
-        rows: receivedRollupRows.length,
       });
     } catch {
       toast({ title: "Copy failed", description: "Clipboard is not available.", variant: "destructive" });
@@ -3109,7 +2419,7 @@ export default function Hub() {
         dry_run: true,
         skip_sync: true,
         week_start_date: weeklyReportStartDate || getCurrentWeekStartDateISO(),
-        reference_date: receivedRollupReferenceDate || toIsoDateOnly(new Date()),
+        reference_date: toIsoDateOnly(new Date()),
       });
 
       if (!payload.ok) {
@@ -3121,7 +2431,7 @@ export default function Hub() {
       toast({ title: "Preview ready", description: "Slack preview generated below." });
       void trackHubEvent("weekly_dispatch_preview_generated", {
         week_start: payload.week_start_date || weeklyReportStartDate,
-        reference_date: payload.reference_date || receivedRollupReferenceDate,
+        reference_date: payload.reference_date || toIsoDateOnly(new Date()),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate weekly dispatch preview.";
@@ -3141,7 +2451,7 @@ export default function Hub() {
     try {
       const payload = await invokeFunctionRobust<WeeklyTicketReportDispatchResponse>("weekly_ticket_report_dispatch", {
         week_start_date: weeklyReportStartDate || getCurrentWeekStartDateISO(),
-        reference_date: receivedRollupReferenceDate || toIsoDateOnly(new Date()),
+        reference_date: toIsoDateOnly(new Date()),
       });
 
       if (!payload.ok) {
@@ -3152,7 +2462,7 @@ export default function Hub() {
       setWeeklyDispatchPreview(null);
       void trackHubEvent("weekly_dispatch_sent_manual", {
         week_start: payload.week_start_date || weeklyReportStartDate,
-        reference_date: payload.reference_date || receivedRollupReferenceDate,
+        reference_date: payload.reference_date || toIsoDateOnly(new Date()),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Weekly dispatch send failed.";
@@ -3429,41 +2739,18 @@ export default function Hub() {
   }, [authorized, inReportsRoute, refreshKey, weeklyReportStartDate]);
 
   useEffect(() => {
-    if (!authorized || !inReportsRoute) {
+    if (!authorized) {
+      setReceivedRollupRows([]);
+      setReceivedRollupError(null);
+      setReceivedRollupLoading(false);
+      return;
+    }
+
+    if (!inReportsRoute) {
       return;
     }
 
     void refreshReceivedRollup();
-  }, [authorized, inReportsRoute, refreshKey, receivedRollupReferenceDate]);
-
-  useEffect(() => {
-    if (!authorized) {
-      setTicketDataCoverage(null);
-      setTicketDataCoverageError(null);
-      setTicketDataCoverageLoading(false);
-      return;
-    }
-
-    if (!inReportsRoute) {
-      return;
-    }
-
-    void refreshTicketDataCoverage();
-  }, [authorized, inReportsRoute, refreshKey]);
-
-  useEffect(() => {
-    if (!authorized) {
-      setHubAnalyticsBaseline(null);
-      setHubAnalyticsBaselineError(null);
-      setHubAnalyticsBaselineLoading(false);
-      return;
-    }
-
-    if (!inReportsRoute) {
-      return;
-    }
-
-    void refreshHubAnalyticsBaseline();
   }, [authorized, inReportsRoute, refreshKey]);
 
   useEffect(() => {
@@ -4242,30 +3529,20 @@ export default function Hub() {
               receivedRollupRows={receivedRollupRows}
               receivedRollupLoading={receivedRollupLoading}
               receivedRollupError={receivedRollupError}
-              analyticsBaseline={hubAnalyticsBaseline}
-              analyticsBaselineLoading={hubAnalyticsBaselineLoading}
-              analyticsBaselineError={hubAnalyticsBaselineError}
-              coverage={ticketDataCoverage}
-              coverageLoading={ticketDataCoverageLoading}
-              coverageError={ticketDataCoverageError}
+              omniOneTickets={omniOneTickets}
+              omniArenaTickets={omniArenaTickets}
               loading={weeklyReportLoading}
               error={weeklyReportError}
               weekStartDate={weeklyReportStartDate}
-              rollupReferenceDate={receivedRollupReferenceDate}
               onWeekStartDateChange={setWeeklyReportStartDate}
-              onRollupReferenceDateChange={setReceivedRollupReferenceDate}
               onRefresh={refreshWeeklyReport}
               onRefreshReceivedRollup={refreshReceivedRollup}
               onCopySummary={handleCopyWeeklySummary}
-              onCopyReceivedRollupSummary={handleCopyReceivedRollupSummary}
               dispatchPreview={weeklyDispatchPreview}
               dispatchLoading={weeklyDispatchLoading}
               onPreviewDispatch={handlePreviewWeeklyDispatch}
               onSendDispatch={handleSendWeeklyDispatchNow}
               onClearDispatchPreview={() => setWeeklyDispatchPreview(null)}
-              onTrackEvent={(eventName, metadata) => {
-                void trackHubEvent(eventName, metadata ?? {});
-              }}
             />
           ) : inVideosRoute ? (
             <VideosPane />

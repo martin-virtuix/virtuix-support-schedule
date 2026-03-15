@@ -205,7 +205,7 @@
   }
 
   .brand-chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-border/75 bg-background/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground;
+    @apply inline-flex items-center gap-1 rounded-full border border-border/75 bg-background/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-background/75 hover:text-foreground hover:shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.9)];
   }
 
   .reveal-up {

@@ -85,13 +85,8 @@ export default function Index() {
                 <span className="block text-gradient">Coverage Calendar</span>
               </h1>
               <p className="max-w-3xl text-[15px] leading-7 text-muted-foreground md:text-[17px]">
-                Weekly support staffing for public visibility. Current and upcoming coverage is synced from operations planning and refreshes automatically.
+                Weekly support staffing for public visibility. Current and upcoming coverage is synced from operations planning.
               </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="brand-chip border-primary/35 bg-primary/12 text-primary">Live Updates</span>
-                <span className="brand-chip">Ops-Managed</span>
-                <span className="brand-chip">Virtuix Support</span>
-              </div>
             </div>
 
             <aside className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-1">
@@ -102,10 +97,6 @@ export default function Index() {
               <div className="surface-panel-soft p-4">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Coverage Owners</p>
                 <p className="mt-1 text-sm font-medium leading-6 text-foreground md:text-[15px]">Martin and Jonathan</p>
-              </div>
-              <div className="surface-panel-soft p-4 sm:col-span-2 xl:col-span-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Scope</p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">Omni One + Omni Arena support operations coverage.</p>
               </div>
             </aside>
           </div>
