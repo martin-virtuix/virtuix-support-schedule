@@ -723,3 +723,63 @@ Modified (major):
 ### Verification (Latest Iterations)
 - `npm run build` passed.
 - `npm run test -- --run` passed.
+
+## Session Continuation (2026-03-14)
+
+### Iteration 23) New `/hub/videos` section + YouTube library integration
+- Added new Hub route wiring:
+  - `/hub/videos` in `src/App.tsx`
+  - tab + side navigation + route-state handling in `src/pages/Hub.tsx`
+- Added new videos UI pane:
+  - `src/components/hub/VideosPane.tsx`
+  - responsive video library + now-playing panel + search + brand filters
+- Added centralized video data and parsing module:
+  - `src/lib/hubVideos.ts`
+  - supports YouTube URL formats (`watch`, `shorts`, `youtu.be`, `embed`)
+- Added Omni Arena YouTube videos:
+  - How to Replace Omni AGG Board — https://youtu.be/M1QHrAI8nzQ
+  - How to Replace a Side Exterior TV — https://youtu.be/fY3DuJx2LoI
+  - How to Replace a Front Exterior TV — https://youtu.be/DMZBNjQrcgk
+  - How to Replace an Internal HE Cable — https://youtu.be/YO-ovka3AZ8
+  - How to Replace a PC — https://youtu.be/8zlhuQLIt2k
+  - How to Replace an Omni Ring Handle — https://youtu.be/F3w_JydU47o
+- Added Omni One YouTube videos:
+  - Omni One - Walking Tutorial — https://www.youtube.com/watch?v=4oMuVxaH5NM
+  - How to Prepare your Omni One Arm for Shipping — https://www.youtube.com/shorts/Xy96H1dRLYU
+  - How to Assemble your Omni One — https://www.youtube.com/watch?v=s6-BI1HkKpM
+  - How to Pair the Omni One Foot Trackers — https://www.youtube.com/watch?v=P6u1_4mgldw
+  - How to Adjust your Omni One — https://www.youtube.com/watch?v=7PFN8-gFrfo
+  - How to Strafe in Omni One — https://www.youtube.com/watch?v=og3NRkubsfY
+
+### Iteration 24) UX/UI polish + brand filter updates for videos
+- Rebalanced layout to prioritize playback:
+  - smaller desktop library column
+  - larger "Now Playing" panel and player height
+- Added UX polish:
+  - featured badges, improved hierarchy/spacing, up-next cards, hover/focus states, staggered reveal
+- Updated brand filters:
+  - removed `Support Ops` bubble
+  - filters now only show Omni One and Omni Arena (plus `all` internal state)
+- Updated video card brand bubbles:
+  - removed text labels (`OMNI ONE` / `OMNI ARENA`) for card badges
+  - logo-only pills with normalized sizing to avoid compressed logos
+
+### Iteration 25) Dropbox mixed-source video support
+- Extended video model for mixed sources:
+  - source types: `youtube` and `dropbox`
+  - playback modes: `embed` (YouTube) and HTML5 `video` (Dropbox raw link)
+  - fallback external-open actions retained for all sources
+- Added Dropbox-specific handling:
+  - transforms shared Dropbox links to playback URL (`raw=1`) for inline player when available
+  - graceful fallback to "Open in Dropbox"
+- Added Dropbox videos:
+  - How to Adjust the Height Latch Mechanism - Part 1 — https://www.dropbox.com/s/dzypltag1l4f1q9/Height%20Lock%20Adjustment%20Video%201.mp4?dl=0
+  - How to Adjust the Height Latch Mechanism - Part 2 — https://www.dropbox.com/s/x36gf59rg6yal2d/Height%20Lock%20Adjustment%20Video%202.mp4?dl=0
+- Final brand assignment decision:
+  - both Dropbox videos assigned to `omni_arena`
+
+### Verification + Git
+- Repeated `npm run build` validations passed after each major video integration/edit step.
+- Committed and pushed to `main`:
+  - commit `c04f84c`
+  - message: `Add /hub/videos library with YouTube and Dropbox support`
