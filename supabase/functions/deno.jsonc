@@ -1,0 +1,10 @@
+{
+  "lock": false,
+  "compilerOptions": {
+    "strict": true
+  },
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+    "std/http/server.ts": "https://deno.land/std@0.224.0/http/server.ts"
+  }
+}
