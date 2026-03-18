@@ -8,6 +8,8 @@ interface ArenaSitesTableProps {
   sites: ArenaSite[];
   loading?: boolean;
   error?: string | null;
+  initialStatusFilter?: StatusFilter;
+  lockedStatusFilter?: StatusFilter;
 }
 
 function normalize(value: string) {
@@ -39,20 +41,27 @@ function Badge({ status }: { status: string }) {
 
 type StatusFilter = "all" | "current" | "no-support";
 
-export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps) {
+export function ArenaSitesTable({
+  sites,
+  loading,
+  error,
+  initialStatusFilter = "all",
+  lockedStatusFilter,
+}: ArenaSitesTableProps) {
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter);
   const [sortAsc, setSortAsc] = useState(true);
+  const activeStatusFilter = lockedStatusFilter ?? statusFilter;
 
   const filtered = useMemo(() => {
     const q = normalize(query);
     let list = [...(sites || [])];
 
-    if (statusFilter === "current") {
+    if (activeStatusFilter === "current") {
       list = list.filter((site) => normalize(site.currentQuarterStatus) === "current");
     }
 
-    if (statusFilter === "no-support") {
+    if (activeStatusFilter === "no-support") {
       list = list.filter((site) => {
         const status = normalize(site.currentQuarterStatus);
         return status === "no support" || status === "nosupport";
@@ -75,7 +84,7 @@ export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps)
     });
 
     return list;
-  }, [sites, query, statusFilter, sortAsc]);
+  }, [sites, query, activeStatusFilter, sortAsc]);
 
   if (loading) {
     return <div className="text-sm text-muted-foreground">Loading sites...</div>;
@@ -96,22 +105,24 @@ export function ArenaSitesTable({ sites, loading, error }: ArenaSitesTableProps)
             className="h-9 w-full sm:w-[300px]"
           />
 
-          <div className="flex flex-wrap items-center gap-2">
-            {([
-              { key: "all", label: "All" },
-              { key: "current", label: "Current" },
-              { key: "no-support", label: "No Support" },
-            ] as const).map((filter) => (
-              <Button
-                key={filter.key}
-                size="sm"
-                variant={statusFilter === filter.key ? "secondary" : "ghost"}
-                onClick={() => setStatusFilter(filter.key)}
-              >
-                {filter.label}
-              </Button>
-            ))}
-          </div>
+          {lockedStatusFilter ? null : (
+            <div className="flex flex-wrap items-center gap-2">
+              {([
+                { key: "all", label: "All" },
+                { key: "current", label: "Current" },
+                { key: "no-support", label: "No Support" },
+              ] as const).map((filter) => (
+                <Button
+                  key={filter.key}
+                  size="sm"
+                  variant={statusFilter === filter.key ? "secondary" : "ghost"}
+                  onClick={() => setStatusFilter(filter.key)}
+                >
+                  {filter.label}
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 sm:justify-end">

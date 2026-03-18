@@ -848,3 +848,14 @@ Validation:
 
 Validation:
 - `npm run build` passed.
+
+### Iteration 31) Public Omni Arena no-support table restoration
+- Added the Omni Arena sites table back to the public `/` page under the schedule sections.
+- Scoped the public table to only show venues flagged with the `No Support` status.
+- Extended `ArenaSitesTable` with an optional locked status filter so public `/` can stay fixed on `No Support` while Hub keeps its existing interactive filters.
+- Updated the public section title to:
+  - `Omni Arena Sites Not Supported (Pending Omni Care Payment)`
+
+Validation:
+- `npm run build` passed.
+- `npm run dev` started successfully on `http://127.0.0.1:8080/`.

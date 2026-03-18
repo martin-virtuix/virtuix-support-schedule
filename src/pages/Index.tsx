@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { WeekCard } from "@/components/schedule/WeekCard";
 import { ScheduleTable } from "@/components/schedule/ScheduleTable";
+import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
 import { Button } from "@/components/ui/button";
 import {
   CURRENT_WEEK_CSV_URL,
   NEXT_WEEK_CSV_URL,
+  getArenaSites,
+  type ArenaSite,
   ScheduleBundle,
   displayOrder,
   formatHours,
@@ -53,9 +56,17 @@ function getWeekRange(offset: number = 0): string {
   return `${formatDate(monday)} - ${formatDate(sunday)}`;
 }
 
+function isNoSupportStatus(status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  return normalized === "no support" || normalized === "nosupport";
+}
+
 export default function Index() {
   const [currentBundle, setCurrentBundle] = useState<ScheduleBundle | null>(null);
   const [nextBundle, setNextBundle] = useState<ScheduleBundle | null>(null);
+  const [sites, setSites] = useState<ArenaSite[]>([]);
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [sitesError, setSitesError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const now = new Date();
@@ -63,6 +74,7 @@ export default function Index() {
   const todaySnapshot = getTodaySnapshot(currentBundle);
   const currentWeekStaffedDays = getStaffedDayCount(currentBundle);
   const nextWeekStaffedDays = getStaffedDayCount(nextBundle);
+  const noSupportSitesCount = sites.filter((site) => isNoSupportStatus(site.currentQuarterStatus)).length;
 
   const overviewCards = [
     {
@@ -108,6 +120,28 @@ export default function Index() {
     // Update time display every minute
     const interval = setInterval(() => setTick(t => t + 1), 60000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    setSitesLoading(true);
+    setSitesError(null);
+
+    getArenaSites()
+      .then((data) => {
+        if (mounted) setSites(data);
+      })
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        setSitesError(error instanceof Error ? error.message : "Unable to load Omni Arena site coverage right now.");
+      })
+      .finally(() => {
+        if (mounted) setSitesLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (
@@ -214,6 +248,29 @@ export default function Index() {
             <ScheduleTable bundle={nextBundle} highlightToday={false} />
           </section>
         </div>
+
+        <section className="surface-panel reveal-up reveal-delay-3 space-y-5 p-5 md:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground md:text-[13px]">
+                Omni Arena Sites Not Supported (Pending Omni Care Payment)
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Only venues currently flagged with the No Support status are shown here.
+              </p>
+            </div>
+            <span className="brand-chip border-destructive/35 bg-destructive/12 text-destructive">
+              {sitesLoading ? "Loading" : `${noSupportSitesCount} No Support`}
+            </span>
+          </div>
+          <ArenaSitesTable
+            sites={sites}
+            loading={sitesLoading}
+            error={sitesError}
+            lockedStatusFilter="no-support"
+            initialStatusFilter="no-support"
+          />
+        </section>
 
         <footer className="surface-panel-soft px-5 py-4 text-center text-[13px] text-muted-foreground md:text-sm">
           Operational schedule feed for Omni support coverage. Data refreshes automatically from the source sheet.
