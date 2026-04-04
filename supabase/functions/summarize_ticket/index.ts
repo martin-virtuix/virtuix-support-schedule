@@ -42,6 +42,7 @@ CRITICAL RULES
 - Compress information aggressively.
 - Focus on the overall situation, not the full history.
 - Summarize patterns and outcomes rather than listing every message.
+- If the ticket conversation is written fully or partially in a language other than English, translate the relevant content into English in the final summary.
 - Do NOT include long bullet lists.
 - Do NOT repeat the conversation timeline.
 - Use short paragraphs instead of long lists.
@@ -74,6 +75,7 @@ STYLE GUIDELINES
 ----------------------------------------
 
 - Be concise and direct.
+- Write the final summary in English only.
 - Prioritize clarity over detail.
 - Avoid bullet lists unless absolutely necessary.
 - Avoid repeating minor troubleshooting steps.

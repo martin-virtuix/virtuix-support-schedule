@@ -3,6 +3,8 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { CalendarDays, Copy, Download, ExternalLink, FileText, Loader2, Menu, RefreshCw, Search, Send, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { BrandLockup } from "@/components/BrandLockup";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -30,8 +32,6 @@ import type {
   WeeklyTicketReportDispatchResponse,
   WeeklyTicketReportRow,
 } from "@/types/support";
-import virtuixLogoWhite from "@/assets/virtuix_logo_white.png";
-import omniOneSquareLogo from "@/assets/omnione_logo_square.png";
 import omniArenaLogo from "@/assets/omniarena-logo.png";
 import omniOneLogo from "@/assets/omnione_logo_color.png";
 
@@ -847,10 +847,7 @@ function SideNavigation({
   return (
     <div className="flex h-full flex-col surface-panel p-4">
       <div className="mb-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <img src={virtuixLogoWhite} alt="Virtuix" className="h-6 w-auto" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Support Hub</span>
-        </div>
+        <BrandLockup size="sm" showOmniOne={false} accessoryLabel="Support Hub" />
 
         <div className="rounded-2xl border border-border/70 bg-background/45 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Workspace Snapshot</p>
@@ -1295,7 +1292,7 @@ function DigestsPane({
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-xl border border-primary/25 bg-gradient-to-b from-[#171d12] via-[#111610] to-[#0c100b] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <div className="overflow-hidden rounded-xl border border-primary/25 bg-gradient-to-b from-card via-card to-muted/55 shadow-[inset_0_1px_0_rgba(15,23,42,0.05)] dark:from-[#171d12] dark:via-[#111610] dark:to-[#0c100b] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
               <div className="border-b border-primary/20 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary/90">
                 Digest Result
               </div>
@@ -1400,17 +1397,17 @@ function DocumentsPane({
         </div>
 
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+          <div className="rounded-xl border border-border/70 bg-card/68 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">PDF Library</p>
             <p className="mt-1 text-2xl font-semibold tracking-tight">{allDocuments.length}</p>
             <p className="text-[12px] leading-5 text-muted-foreground">Documents currently available in the library.</p>
           </div>
-          <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+          <div className="rounded-xl border border-border/70 bg-card/68 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Current Scope</p>
             <p className="mt-1 text-lg font-semibold tracking-tight">{activeFolderLabel}</p>
             <p className="text-[12px] leading-5 text-muted-foreground">{filteredDocuments.length} docs in current view.</p>
           </div>
-          <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+          <div className="rounded-xl border border-border/70 bg-card/68 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Search Matches</p>
             <p className="mt-1 text-2xl font-semibold tracking-tight">{semanticResults.length}</p>
             <p className="text-[12px] leading-5 text-muted-foreground">
@@ -1425,17 +1422,22 @@ function DocumentsPane({
               key={brand}
               size="sm"
               variant={activeBrand === brand ? "secondary" : "ghost"}
-              className="h-10 gap-2 px-2.5"
+              className="h-11 gap-2.5 rounded-full px-3"
               onClick={() => onSelectBrand(brand)}
               aria-label={brandMeta[brand].label}
               title={brandMeta[brand].label}
             >
-              <img
-                src={brandMeta[brand].logo}
-                alt={brandMeta[brand].label}
-                className={`w-auto shrink-0 object-contain ${brand === "omni_arena" ? "h-[18px]" : "h-5"}`}
-              />
-              <span className="rounded-full border border-border/70 bg-background/55 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              <span className={`brand-logo-shell shrink-0 ${brand === "omni_arena" ? "h-7 min-w-[76px] px-2.5" : "h-7 min-w-[68px] px-2.5"}`}>
+                <img
+                  src={brandMeta[brand].logo}
+                  alt={brandMeta[brand].label}
+                  className={`w-auto shrink-0 object-contain ${brand === "omni_arena" ? "h-[14px]" : "h-4"}`}
+                />
+              </span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">
+                {brandMeta[brand].label}
+              </span>
+              <span className="rounded-full border border-border/70 bg-card/75 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
                 {(documentsByBrand[brand] || []).length}
               </span>
             </Button>
@@ -1511,7 +1513,7 @@ function DocumentsPane({
               {semanticResults.map((result) => (
                 <button
                   key={result.chunk_id}
-                  className="w-full rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-left transition hover:border-primary/35 hover:bg-muted/35"
+                  className="w-full rounded-lg border border-border/70 bg-card/72 px-3 py-3 text-left transition hover:border-primary/35 hover:bg-muted/35"
                   onClick={() => onSelectSemanticResult(result)}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -1543,7 +1545,7 @@ function DocumentsPane({
               <button
                 key={document.path}
                 className={[
-                  "w-full rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-left transition",
+                  "w-full rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-left transition",
                   selectedDocumentPath === document.path
                     ? "border-primary/45 bg-primary/[0.11] shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]"
                     : "hover:border-primary/35 hover:bg-muted/35",
@@ -3576,11 +3578,11 @@ export default function Hub() {
         <div className="pointer-events-none absolute inset-0 ambient-grid opacity-[0.14]" />
 
         <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-primary/28 via-primary/10 to-transparent backdrop-blur-sm">
-          <div className="container max-w-[2200px] px-4 py-4">
+          <div className="container flex max-w-[2200px] items-center justify-between gap-3 px-4 py-4">
             <Link to="/" className="inline-flex items-center gap-3">
-              <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
-              <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
+              <BrandLockup />
             </Link>
+            <ThemeToggle />
           </div>
         </div>
 
@@ -3608,11 +3610,11 @@ export default function Hub() {
         <div className="pointer-events-none absolute inset-0 ambient-grid opacity-[0.14]" />
 
         <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-primary/28 via-primary/10 to-transparent backdrop-blur-sm">
-          <div className="container max-w-[2200px] px-4 py-4">
+          <div className="container flex max-w-[2200px] items-center justify-between gap-3 px-4 py-4">
             <Link to="/" className="inline-flex items-center gap-3">
-              <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
-              <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
+              <BrandLockup />
             </Link>
+            <ThemeToggle />
           </div>
         </div>
 
@@ -3700,10 +3702,10 @@ export default function Hub() {
       <div className="relative z-10 border-b border-border/50 bg-gradient-to-b from-primary/24 via-primary/8 to-transparent backdrop-blur-sm">
         <div className="container flex max-w-[2200px] items-center justify-between gap-3 px-4 py-3">
           <Link to="/" className="inline-flex items-center gap-3">
-            <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
-            <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
+            <BrandLockup />
           </Link>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button asChild size="sm" variant="ghost" className="hidden sm:inline-flex">
               <Link to="/">Public Schedule</Link>
             </Button>
@@ -3888,7 +3890,7 @@ export default function Hub() {
                     />
                   </section>
 
-                  <section className="rounded-2xl border border-border/70 bg-background/35 px-5 py-4 text-[13px] leading-6 text-muted-foreground">
+                  <section className="rounded-2xl border border-border/70 bg-card/55 px-5 py-4 text-[13px] leading-6 text-muted-foreground">
                     Ticket selections persist across both brand tables. Open any ticket to generate a fresh summary, copy it,
                     or send it to Slack without leaving the queue view.
                   </section>
@@ -3896,9 +3898,14 @@ export default function Hub() {
                   <section className="grid gap-5 xl:gap-6 2xl:grid-cols-2">
                     <section className="surface-panel space-y-4 p-5 md:p-6">
                       <div className="flex items-center justify-between border-b border-border/55 pb-3">
-                        <div>
-                          <img src={omniOneLogo} alt="Omni One" className="h-7 w-auto" />
-                          <p className="mt-2 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
+                        <div className="flex items-center gap-3">
+                          <span className="brand-logo-shell h-10 min-w-[76px] px-3">
+                            <img src={omniOneLogo} alt="Omni One" className="h-5 w-auto" />
+                          </span>
+                          <div>
+                            <p className="text-base font-semibold tracking-tight">Omni One</p>
+                            <p className="mt-1 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
+                          </div>
                         </div>
                         <span className="brand-chip">{omniOneTickets.length} tickets</span>
                       </div>
@@ -3917,9 +3924,14 @@ export default function Hub() {
 
                     <section className="surface-panel space-y-4 p-5 md:p-6">
                       <div className="flex items-center justify-between border-b border-border/55 pb-3">
-                        <div>
-                          <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
-                          <p className="mt-2 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
+                        <div className="flex items-center gap-3">
+                          <span className="brand-logo-shell h-10 min-w-[84px] px-3">
+                            <img src={omniArenaLogo} alt="Omni Arena" className="h-[16px] w-auto" />
+                          </span>
+                          <div>
+                            <p className="text-base font-semibold tracking-tight">Omni Arena</p>
+                            <p className="mt-1 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
+                          </div>
                         </div>
                         <span className="brand-chip">{omniArenaTickets.length} tickets</span>
                       </div>
@@ -3938,10 +3950,12 @@ export default function Hub() {
 
                     <section className="surface-panel space-y-4 p-5 md:p-6 2xl:col-span-2">
                       <div className="flex items-center justify-between border-b border-border/55 pb-3">
-                        <div className="flex items-center gap-2">
-                          <img src={omniArenaLogo} alt="Omni Arena" className="h-7 w-auto" />
+                        <div className="flex items-center gap-3">
+                          <span className="brand-logo-shell h-10 min-w-[84px] px-3">
+                            <img src={omniArenaLogo} alt="Omni Arena" className="h-[16px] w-auto" />
+                          </span>
                           <div>
-                            <span className="text-sm text-muted-foreground">Arena Sites</span>
+                            <p className="text-base font-semibold tracking-tight">Arena Sites</p>
                             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
                               Filter and search venue coverage status without leaving the ticket workspace.
                             </p>

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import omniArenaLogo from "@/assets/omniarena-logo.png";
 import omniOneLogo from "@/assets/omnione_logo_color.png";
+import { cn } from "@/lib/utils";
 import {
   getHubVideoLibraryEntries,
   HUB_VIDEO_LIBRARY,
@@ -50,34 +51,40 @@ function BrandPill({
   brand: HubVideoBrand;
   compact?: boolean;
 }) {
-  const shellClass = compact
+  const pillClassName = compact
     ? brand === "omni_arena"
-      ? "h-6 min-w-[72px] px-2"
-      : "h-6 min-w-[56px] px-2"
+      ? "min-w-[118px] gap-1.5 px-2 py-1"
+      : "min-w-[108px] gap-1.5 px-2 py-1"
     : brand === "omni_arena"
-      ? "h-8 min-w-[88px] px-2.5"
-      : "h-8 min-w-[68px] px-2.5";
+      ? "min-w-[132px] gap-2 px-2.5 py-1.5"
+      : "min-w-[122px] gap-2 px-2.5 py-1.5";
+  const logoShellClassName = compact ? "h-6 px-2" : "h-7 px-2.5";
   const logoClassName = compact
     ? brand === "omni_arena"
       ? "h-[14px] w-auto shrink-0 object-contain"
       : "h-[16px] w-auto shrink-0 object-contain"
-    : BRAND_META[brand].logoClassName;
+    : cn("w-auto shrink-0 object-contain", BRAND_META[brand].logoClassName);
+  const labelClassName = compact
+    ? "text-[10px] tracking-[0.1em]"
+    : "text-[11px] tracking-[0.12em]";
 
   return (
     <span
-      className={[
-        "inline-flex items-center justify-center rounded-full border border-border/70 bg-background/60",
-        compact ? "py-0.5" : "py-1",
-        shellClass,
-      ].join(" ")}
+      className={cn(
+        "inline-flex items-center rounded-full border border-border/80 bg-card/80 shadow-[0_14px_30px_-24px_rgba(15,23,42,0.3)]",
+        pillClassName,
+      )}
       aria-label={BRAND_META[brand].label}
       title={BRAND_META[brand].label}
     >
-      <img
-        src={BRAND_META[brand].logo}
-        alt={BRAND_META[brand].label}
-        className={logoClassName}
-      />
+      <span className={cn("brand-logo-shell", logoShellClassName)}>
+        <img
+          src={BRAND_META[brand].logo}
+          alt={BRAND_META[brand].label}
+          className={logoClassName}
+        />
+      </span>
+      <span className={cn("font-semibold uppercase text-foreground/88", labelClassName)}>{BRAND_META[brand].label}</span>
     </span>
   );
 }
@@ -114,7 +121,7 @@ function VideoCard({
               className="aspect-video w-full object-cover transition duration-500 group-hover:scale-[1.03]"
             />
           ) : (
-            <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-[#11181f] via-[#0c141a] to-[#081016]">
+            <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-card via-muted/70 to-background dark:from-[#11181f] dark:via-[#0c141a] dark:to-[#081016]">
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
                 <Play className="h-3.5 w-3.5" />
                 Dropbox Video
@@ -135,10 +142,10 @@ function VideoCard({
         </div>
       </button>
       <div className="mt-3 space-y-2">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-[13px] font-semibold leading-5 text-foreground/95 md:text-[14px]">{video.title}</p>
-            <BrandPill brand={video.brand} compact />
-          </div>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[13px] font-semibold leading-5 text-foreground/95 md:text-[14px]">{video.title}</p>
+          <BrandPill brand={video.brand} compact />
+        </div>
         {video.description ? (
           <p className="text-[12px] leading-5 text-muted-foreground">{video.description}</p>
         ) : null}
@@ -306,7 +313,7 @@ export function VideosPane() {
                           className="h-14 w-24 rounded-md border border-border/70 object-cover transition duration-300 group-hover:scale-[1.03]"
                         />
                       ) : (
-                        <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-md border border-border/70 bg-gradient-to-br from-[#11181f] via-[#0c141a] to-[#081016] text-[9px] font-semibold uppercase tracking-[0.1em] text-primary">
+                        <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-md border border-border/70 bg-gradient-to-br from-card via-muted/70 to-background text-[9px] font-semibold uppercase tracking-[0.1em] text-primary dark:from-[#11181f] dark:via-[#0c141a] dark:to-[#081016]">
                           Dropbox
                         </div>
                       )}

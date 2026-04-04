@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
+import { BrandLockup } from "@/components/BrandLockup";
 import { WeekCard } from "@/components/schedule/WeekCard";
 import { ScheduleTable } from "@/components/schedule/ScheduleTable";
 import { ArenaSitesTable } from "@/components/schedule/ArenaSitesTable";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
   CURRENT_WEEK_CSV_URL,
@@ -17,8 +19,6 @@ import {
   keyByIndex,
   loadScheduleBundle,
 } from "@/lib/scheduleData";
-import omniOneSquareLogo from "@/assets/omnione_logo_square.png";
-import virtuixLogoWhite from "@/assets/virtuix_logo_white.png";
 
 function getStaffedDayCount(bundle: ScheduleBundle | null): number {
   if (!bundle) return 0;
@@ -151,11 +151,9 @@ export default function Index() {
 
       <div className="relative z-10 border-b border-border/55 bg-gradient-to-b from-primary/30 via-primary/10 to-transparent backdrop-blur-md">
         <div className="container flex max-w-[2200px] flex-wrap items-center justify-between gap-3 px-4 py-4">
-          <div className="flex items-center gap-3">
-            <img src={virtuixLogoWhite} alt="Virtuix" className="h-7 w-auto" />
-            <img src={omniOneSquareLogo} alt="Omni One" className="h-7 w-auto" />
-          </div>
+          <BrandLockup />
           <div className="flex flex-wrap items-center gap-2">
+            <ThemeToggle />
             <Button asChild size="sm" variant="outline">
               <a href="#current-week">View Current Week</a>
             </Button>
@@ -208,7 +206,7 @@ export default function Index() {
             </aside>
           </div>
 
-          <div className="relative mt-6 rounded-2xl border border-border/65 bg-background/45 px-4 py-3 text-sm text-muted-foreground md:px-5">
+          <div className="relative mt-6 rounded-2xl border border-border/65 bg-card/68 px-4 py-3 text-sm text-muted-foreground md:px-5">
             <span className="font-medium text-foreground">Today&apos;s note:</span> {todaySnapshot.note}
           </div>
         </header>

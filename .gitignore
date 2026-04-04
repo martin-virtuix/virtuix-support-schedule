@@ -37,3 +37,5 @@ src/assets/omnione_logo_square .png
 supabase/functions/deno.json
 supabase/functions/refresh-open-tickets/
 supabase/migrations/20260216003000_schedule_open_ticket_sync.sql
+.venv/
+scripts/__pycache__/

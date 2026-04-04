@@ -6,52 +6,57 @@
 
 @layer base {
   :root {
-    --background: 218 34% 7%;
-    --foreground: 210 20% 97%;
+    --background: 102 20% 95%;
+    --foreground: 222 42% 12%;
 
-    --card: 220 28% 10%;
-    --card-foreground: 210 20% 97%;
+    --card: 0 0% 99%;
+    --card-foreground: 222 42% 12%;
 
-    --popover: 220 28% 10%;
-    --popover-foreground: 210 20% 97%;
+    --popover: 0 0% 99%;
+    --popover-foreground: 222 42% 12%;
 
-    --primary: 92 66% 46%;
-    --primary-foreground: 216 35% 10%;
+    --primary: 92 58% 35%;
+    --primary-foreground: 0 0% 98%;
 
-    --secondary: 220 22% 16%;
-    --secondary-foreground: 210 20% 97%;
+    --secondary: 102 18% 91%;
+    --secondary-foreground: 222 42% 12%;
 
-    --muted: 219 20% 18%;
-    --muted-foreground: 213 11% 70%;
+    --muted: 102 17% 92%;
+    --muted-foreground: 220 10% 36%;
 
-    --accent: 92 66% 46%;
-    --accent-foreground: 216 35% 10%;
+    --accent: 92 58% 35%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 70% 54%;
     --destructive-foreground: 0 0% 98%;
 
-    --success: 146 70% 42%;
-    --success-foreground: 215 40% 9%;
+    --success: 146 58% 34%;
+    --success-foreground: 0 0% 98%;
 
-    --warning: 42 93% 54%;
-    --warning-foreground: 216 40% 10%;
+    --warning: 42 82% 44%;
+    --warning-foreground: 0 0% 98%;
 
-    --border: 218 20% 24%;
-    --input: 218 21% 16%;
-    --ring: 92 66% 46%;
+    --border: 104 10% 82%;
+    --input: 102 16% 88%;
+    --ring: 92 58% 35%;
 
     --radius: 0.9rem;
     --font-sans: "Manrope", "Segoe UI", sans-serif;
     --font-display: "Sora", "Manrope", sans-serif;
 
-    --sidebar-background: 220 29% 9%;
-    --sidebar-foreground: 210 20% 97%;
-    --sidebar-primary: 92 66% 46%;
-    --sidebar-primary-foreground: 216 35% 10%;
-    --sidebar-accent: 220 20% 15%;
-    --sidebar-accent-foreground: 210 20% 97%;
-    --sidebar-border: 218 20% 24%;
-    --sidebar-ring: 92 66% 46%;
+    --sidebar-background: 90 20% 98%;
+    --sidebar-foreground: 222 42% 12%;
+    --sidebar-primary: 92 58% 35%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 102 17% 93%;
+    --sidebar-accent-foreground: 222 42% 12%;
+    --sidebar-border: 104 10% 82%;
+    --sidebar-ring: 92 58% 35%;
+
+    --panel-shadow: 0 24px 56px -40px rgba(15, 23, 42, 0.24);
+    --panel-soft-shadow: 0 18px 44px -34px rgba(15, 23, 42, 0.18);
+    --glass-shadow: 0 22px 52px -36px rgba(15, 23, 42, 0.2);
+    --table-shell-highlight: rgba(15, 23, 42, 0.05);
   }
 
   .dark {
@@ -100,6 +105,11 @@
     --sidebar-accent-foreground: 210 20% 97%;
     --sidebar-border: 218 20% 24%;
     --sidebar-ring: 92 66% 46%;
+
+    --panel-shadow: 0 26px 70px -42px rgba(0, 0, 0, 0.95);
+    --panel-soft-shadow: 0 20px 60px -42px rgba(0, 0, 0, 0.9);
+    --glass-shadow: 0 24px 64px -42px rgba(0, 0, 0, 0.95);
+    --table-shell-highlight: rgba(255, 255, 255, 0.04);
   }
 }
 
@@ -118,10 +128,10 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
     background-image:
-      radial-gradient(circle at 12% -18%, hsl(var(--primary) / 0.24), transparent 36%),
-      radial-gradient(circle at 92% -12%, hsl(var(--primary) / 0.14), transparent 33%),
-      radial-gradient(circle at 50% 115%, hsl(var(--primary) / 0.11), transparent 42%),
-      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+      radial-gradient(circle at 12% -18%, hsl(var(--primary) / 0.2), transparent 36%),
+      radial-gradient(circle at 92% -12%, rgba(148, 163, 184, 0.14), transparent 30%),
+      radial-gradient(circle at 50% 115%, rgba(15, 23, 42, 0.06), transparent 42%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(96 18% 93%));
     background-attachment: fixed;
   }
 
@@ -184,20 +194,25 @@
   }
 
   .surface-panel {
-    @apply rounded-2xl border border-border/80 bg-card/70 backdrop-blur-xl shadow-[0_26px_70px_-42px_rgba(0,0,0,0.95)];
+    @apply rounded-2xl border border-border/80 bg-card/70 backdrop-blur-xl;
     background-image: linear-gradient(145deg, hsl(var(--card) / 0.96), hsl(var(--card) / 0.68));
+    box-shadow: var(--panel-shadow);
   }
 
   .surface-panel-soft {
-    @apply rounded-2xl border border-border/70 bg-card/55 backdrop-blur-lg shadow-[0_20px_60px_-42px_rgba(0,0,0,0.9)];
+    @apply rounded-2xl border border-border/70 bg-card/55 backdrop-blur-lg;
+    background-image: linear-gradient(145deg, hsl(var(--card) / 0.84), hsl(var(--muted) / 0.72));
+    box-shadow: var(--panel-soft-shadow);
   }
 
   .glass-card {
-    @apply rounded-2xl border border-border/70 bg-card/70 backdrop-blur-2xl shadow-[0_24px_64px_-42px_rgba(0,0,0,0.95)];
+    @apply rounded-2xl border border-border/70 bg-card/70 backdrop-blur-2xl;
+    box-shadow: var(--glass-shadow);
   }
 
   .table-shell {
-    @apply overflow-hidden rounded-xl border border-border/70 bg-background/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)];
+    @apply overflow-hidden rounded-xl border border-border/70 bg-background/70;
+    box-shadow: inset 0 1px 0 var(--table-shell-highlight);
   }
 
   .brand-kicker {
@@ -205,7 +220,20 @@
   }
 
   .brand-chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-border/75 bg-background/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-background/75 hover:text-foreground hover:shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.9)];
+    @apply inline-flex items-center gap-1 rounded-full border border-border/80 bg-card/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-card/95 hover:text-foreground hover:shadow-[0_12px_28px_-20px_hsl(var(--primary)/0.9)];
+  }
+
+  .brand-logo-shell {
+    @apply inline-flex items-center justify-center rounded-full border;
+    border-color: rgba(15, 23, 42, 0.14);
+    background-image: linear-gradient(145deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.9));
+    box-shadow: 0 18px 34px -24px rgba(15, 23, 42, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .dark .brand-logo-shell {
+    border-color: hsl(var(--border) / 0.7);
+    background-image: linear-gradient(145deg, hsl(var(--card) / 0.94), hsl(var(--muted) / 0.84));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
   .reveal-up {
@@ -249,9 +277,13 @@
   }
 
   .report-date-input {
-    color-scheme: dark;
+    color-scheme: light;
     accent-color: hsl(var(--primary));
     position: relative;
+  }
+
+  .dark .report-date-input {
+    color-scheme: dark;
   }
 
   .report-date-input::-webkit-calendar-picker-indicator {

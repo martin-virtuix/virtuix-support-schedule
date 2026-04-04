@@ -86,6 +86,7 @@ CRITICAL RULES
 - Do NOT invent ticket information.
 - Do NOT repeat full ticket conversations.
 - Do NOT generate long ticket summaries.
+- If any ticket content or existing ticket summary is written fully or partially in a language other than English, translate it into English in the digest output.
 - The digest must remain compact and easy to scan.
 - Prioritize readability and structure.
 
@@ -167,6 +168,7 @@ STYLE GUIDELINES
 - Avoid paragraphs
 - Avoid narrative text
 - Keep the digest compact
+- Write the digest in English only
 - Optimize for internal operational use
 
 The digest should be readable in **under 30 seconds**.`;
