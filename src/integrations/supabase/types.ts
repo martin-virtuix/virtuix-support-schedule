@@ -321,6 +321,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      search_ticket_cache: {
+        Args: {
+          match_brand?: string | null
+          match_limit?: number | null
+          match_offset?: number | null
+          match_status?: string | null
+          search_query: string
+        }
+        Returns: {
+          assignee_email: string | null
+          brand: string
+          match_score: number
+          priority: string | null
+          requester_email: string | null
+          requester_name: string | null
+          search_snippet: string | null
+          status: string
+          subject: string
+          summary_text: string | null
+          ticket_id: number
+          ticket_url: string | null
+          zendesk_updated_at: string | null
+        }[]
+      }
       is_virtuix_user: {
         Args: Record<PropertyKey, never>
         Returns: boolean

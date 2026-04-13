@@ -12,6 +12,11 @@ export type Ticket = {
   summary_text: string | null;
 };
 
+export type TicketSearchResult = Ticket & {
+  search_snippet: string | null;
+  match_score: number;
+};
+
 export type TicketSummary = {
   ticket_id: number;
   summary_text: string;

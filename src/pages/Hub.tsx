@@ -27,6 +27,7 @@ import type {
   SummarizeTicketResponse,
   SyncZendeskResponse,
   Ticket,
+  TicketSearchResult,
   TicketReceivedRollupRow,
   TicketSummary,
   WeeklyTicketReportDispatchResponse,
@@ -68,6 +69,23 @@ type TableProps = {
   loading: boolean;
   error: string | null;
   selectedIds: Set<number>;
+  onSelectionChange: (ticketId: number, checked: boolean) => void;
+  onSelectAllVisible: (ticketIds: number[], checked: boolean) => void;
+  onOpenTicket: (ticket: Ticket) => void;
+  onGenerateDigest: (request: DigestRequest) => Promise<void>;
+  generatingDigest: boolean;
+};
+
+type TicketSearchPaneProps = {
+  query: string;
+  loading: boolean;
+  error: string | null;
+  submittedQuery: string;
+  results: TicketSearchResult[];
+  selectedIds: Set<number>;
+  onQueryChange: (value: string) => void;
+  onSearch: () => Promise<void>;
+  onClear: () => void;
   onSelectionChange: (ticketId: number, checked: boolean) => void;
   onSelectAllVisible: (ticketIds: number[], checked: boolean) => void;
   onOpenTicket: (ticket: Ticket) => void;
@@ -1128,6 +1146,261 @@ function TicketTable({
   );
 }
 
+function TicketSearchPane({
+  query,
+  loading,
+  error,
+  submittedQuery,
+  results,
+  selectedIds,
+  onQueryChange,
+  onSearch,
+  onClear,
+  onSelectionChange,
+  onSelectAllVisible,
+  onOpenTicket,
+  onGenerateDigest,
+  generatingDigest,
+}: TicketSearchPaneProps) {
+  const visibleIds = results.map((row) => row.ticket_id);
+  const selectedVisibleCount = visibleIds.filter((id) => selectedIds.has(id)).length;
+  const selectedTotalCount = selectedIds.size;
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const trimmedQuery = query.trim();
+
+  async function handleGenerateDigest() {
+    if (selectedTotalCount > 0) {
+      await onGenerateDigest({ ticketIds: Array.from(selectedIds) });
+      return;
+    }
+
+    await onGenerateDigest({ ticketIds: visibleIds });
+  }
+
+  return (
+    <section className="surface-panel space-y-4 p-5 md:p-6">
+      <div className="flex flex-col gap-4 border-b border-border/55 pb-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Cached Ticket Search</p>
+            <h2 className="mt-1 font-display text-2xl tracking-tight">Search All Cached Tickets</h2>
+          </div>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+            Searches cached subject, requester, assignee, AI summary, and ticket description fields across all brands. V1 does
+            not search public replies or internal notes.
+          </p>
+        </div>
+
+        <div className="text-xs text-muted-foreground lg:text-right">
+          {selectedTotalCount > 0 ? `${selectedTotalCount} selected across queues and search results` : "No tickets selected"}
+        </div>
+      </div>
+
+      <form
+        className="surface-panel-soft flex flex-col gap-3 p-4 lg:flex-row lg:items-center"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSearch();
+        }}
+      >
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Search keywords, ticket ID, requester, summary, or description"
+            className="h-10 w-full pl-9"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={loading || trimmedQuery.length === 0}>
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Searching...
+              </>
+            ) : (
+              <>
+                <Search className="mr-2 h-4 w-4" />
+                Search Cache
+              </>
+            )}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClear} disabled={loading && submittedQuery.length === 0}>
+            Clear
+          </Button>
+          <Button type="button" variant="secondary" onClick={handleGenerateDigest} disabled={loading || generatingDigest || results.length === 0}>
+            {generatingDigest ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Digest Results
+              </>
+            )}
+          </Button>
+        </div>
+      </form>
+
+      <div className="rounded-xl border border-border/65 bg-background/35 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+        {submittedQuery
+          ? (
+            <>
+              Showing <span className="font-medium text-foreground">{results.length}</span> cached matches for{" "}
+              <span className="font-medium text-foreground">&quot;{submittedQuery}&quot;</span>.
+            </>
+          )
+          : "Run a search to scan the full cached ticket set instead of only the latest queue snapshot."}
+      </div>
+
+      <div className="space-y-2 lg:hidden">
+        {loading ? (
+          <p className="surface-panel-soft p-4 text-sm text-muted-foreground">Searching cached tickets...</p>
+        ) : error ? (
+          <p className="surface-panel-soft p-4 text-sm text-destructive">{error}</p>
+        ) : submittedQuery.length === 0 ? (
+          <p className="surface-panel-soft p-4 text-sm text-muted-foreground">No search has been run yet.</p>
+        ) : results.length === 0 ? (
+          <p className="surface-panel-soft p-4 text-sm text-muted-foreground">No cached tickets matched this search.</p>
+        ) : (
+          results.map((row) => {
+            const requester = row.requester_name || row.requester_email || "-";
+            return (
+              <article key={`search-mobile-${row.ticket_id}`} className="surface-panel-soft space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={selectedIds.has(row.ticket_id)}
+                      onCheckedChange={(checked) => onSelectionChange(row.ticket_id, checked === true)}
+                      aria-label={`Select ticket ${row.ticket_id}`}
+                    />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">#{row.ticket_id}</p>
+                      <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">{row.brand}</p>
+                    </div>
+                  </div>
+                  <span
+                    className={[
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.1em]",
+                      statusPillClasses(row.status),
+                    ].join(" ")}
+                  >
+                    {row.status}
+                  </span>
+                </div>
+                <button
+                  className="w-full text-left text-sm font-medium leading-6 underline decoration-muted-foreground/40 hover:decoration-foreground"
+                  onClick={() => onOpenTicket(row)}
+                >
+                  {row.subject}
+                </button>
+                {row.search_snippet && row.search_snippet !== row.subject ? (
+                  <p className="text-[12px] leading-5 text-muted-foreground">{row.search_snippet}</p>
+                ) : null}
+                <div className="space-y-1 text-[12px] leading-5 text-muted-foreground">
+                  <p>Requester: {requester}</p>
+                  <p>Updated: {formatDateTime(row.zendesk_updated_at)}</p>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div className="table-shell hidden lg:block">
+        <div className="max-h-[520px] overflow-y-auto">
+          <table className="w-full text-[14px] md:text-[15px]">
+            <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
+              <tr>
+                <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">
+                  <Checkbox
+                    checked={allVisibleSelected}
+                    onCheckedChange={(checked) => onSelectAllVisible(visibleIds, checked === true)}
+                    aria-label="Select all visible search results"
+                  />
+                </th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Ticket</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Brand</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Subject</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Status</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Requester</th>
+                <th className="px-4 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-semibold">Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td className="px-4 py-6 text-sm text-muted-foreground" colSpan={7}>
+                    Searching cached tickets...
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td className="px-4 py-6 text-sm text-destructive" colSpan={7}>
+                    {error}
+                  </td>
+                </tr>
+              ) : submittedQuery.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-6 text-sm text-muted-foreground" colSpan={7}>
+                    No search has been run yet.
+                  </td>
+                </tr>
+              ) : results.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-6 text-sm text-muted-foreground" colSpan={7}>
+                    No cached tickets matched this search.
+                  </td>
+                </tr>
+              ) : (
+                results.map((row) => {
+                  const requester = row.requester_name || row.requester_email || "-";
+                  return (
+                    <tr key={`search-${row.ticket_id}`} className="border-t hover:bg-muted/40">
+                      <td className="px-3 py-2 align-top">
+                        <Checkbox
+                          checked={selectedIds.has(row.ticket_id)}
+                          onCheckedChange={(checked) => onSelectionChange(row.ticket_id, checked === true)}
+                          aria-label={`Select ticket ${row.ticket_id}`}
+                        />
+                      </td>
+                      <td className="px-4 py-2 align-top font-semibold whitespace-nowrap">#{row.ticket_id}</td>
+                      <td className="px-4 py-2 align-top whitespace-nowrap">{row.brand}</td>
+                      <td className="px-4 py-2 align-top min-w-[360px]">
+                        <button className="text-left underline decoration-muted-foreground/40 hover:decoration-foreground leading-6" onClick={() => onOpenTicket(row)}>
+                          {row.subject}
+                        </button>
+                        {row.search_snippet && row.search_snippet !== row.subject ? (
+                          <p className="mt-1 max-w-[42rem] text-xs leading-5 text-muted-foreground">{row.search_snippet}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-2 align-top whitespace-nowrap">
+                        <span
+                          className={[
+                            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.1em]",
+                            statusPillClasses(row.status),
+                          ].join(" ")}
+                        >
+                          {row.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 align-top whitespace-nowrap">{requester}</td>
+                      <td className="px-4 py-2 align-top whitespace-nowrap text-muted-foreground">{formatDateTime(row.zendesk_updated_at)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function TicketDrawer({
   open,
   onOpenChange,
@@ -2086,6 +2359,11 @@ export default function Hub() {
   const [omniArenaTickets, setOmniArenaTickets] = useState<Ticket[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketsError, setTicketsError] = useState<string | null>(null);
+  const [ticketSearchQuery, setTicketSearchQuery] = useState("");
+  const [ticketSearchSubmittedQuery, setTicketSearchSubmittedQuery] = useState("");
+  const [ticketSearchResults, setTicketSearchResults] = useState<TicketSearchResult[]>([]);
+  const [ticketSearchLoading, setTicketSearchLoading] = useState(false);
+  const [ticketSearchError, setTicketSearchError] = useState<string | null>(null);
   const [summaryMap, setSummaryMap] = useState<Record<number, TicketSummary>>({});
   const [summaryLoadingTicketId, setSummaryLoadingTicketId] = useState<number | null>(null);
 
@@ -2188,6 +2466,66 @@ export default function Hub() {
       const message = error instanceof Error ? error.message : "Unknown analytics track error.";
       console.warn("Hub analytics tracking failed", message);
     }
+  }
+
+  async function runTicketCacheSearch(queryValue = ticketSearchQuery) {
+    const trimmed = queryValue.trim();
+    if (!trimmed) {
+      setTicketSearchLoading(false);
+      setTicketSearchError("Enter a search query.");
+      setTicketSearchSubmittedQuery("");
+      setTicketSearchResults([]);
+      return;
+    }
+
+    setTicketSearchLoading(true);
+    setTicketSearchError(null);
+    setTicketSearchSubmittedQuery(trimmed);
+
+    const { data, error } = await supabase.rpc("search_ticket_cache", {
+      search_query: trimmed,
+      match_limit: 50,
+      match_offset: 0,
+    });
+
+    if (error) {
+      const message = `Cached ticket search failed: ${error.message}`;
+      setTicketSearchError(message);
+      setTicketSearchResults([]);
+      setTicketSearchLoading(false);
+      return;
+    }
+
+    const nextResults: TicketSearchResult[] = (data || []).map((row) => ({
+      ticket_id: row.ticket_id,
+      brand: row.brand,
+      subject: row.subject,
+      status: row.status,
+      priority: row.priority,
+      requester_email: row.requester_email,
+      requester_name: row.requester_name,
+      assignee_email: row.assignee_email,
+      zendesk_updated_at: row.zendesk_updated_at,
+      ticket_url: row.ticket_url,
+      summary_text: row.summary_text,
+      search_snippet: row.search_snippet,
+      match_score: typeof row.match_score === "number" ? row.match_score : 0,
+    }));
+
+    setTicketSearchResults(nextResults);
+    setTicketSearchLoading(false);
+    void trackHubEvent("ticket_cache_search_submitted", {
+      query_length: trimmed.length,
+      result_count: nextResults.length,
+    });
+  }
+
+  function handleClearTicketSearch() {
+    setTicketSearchQuery("");
+    setTicketSearchSubmittedQuery("");
+    setTicketSearchResults([]);
+    setTicketSearchError(null);
+    setTicketSearchLoading(false);
   }
 
   async function listPdfDocumentsForBrand(brand: DocumentBrand): Promise<SupportDocument[]> {
@@ -2712,6 +3050,10 @@ export default function Hub() {
     if (!authorized) {
       setOmniOneTickets([]);
       setOmniArenaTickets([]);
+      setTicketSearchResults([]);
+      setTicketSearchError(null);
+      setTicketSearchLoading(false);
+      setTicketSearchSubmittedQuery("");
       setSummaryMap({});
       return;
     }
@@ -2782,6 +3124,18 @@ export default function Hub() {
       mounted = false;
     };
   }, [authorized, refreshKey]);
+
+  useEffect(() => {
+    if (!authorized) {
+      return;
+    }
+
+    if (!ticketSearchSubmittedQuery) {
+      return;
+    }
+
+    void runTicketCacheSearch(ticketSearchSubmittedQuery);
+  }, [authorized, refreshKey, ticketSearchSubmittedQuery]);
 
   useEffect(() => {
     if (!authorized) {
@@ -3866,6 +4220,23 @@ export default function Hub() {
                 <VideosPane />
               ) : (
                 <>
+                  <TicketSearchPane
+                    query={ticketSearchQuery}
+                    loading={ticketSearchLoading}
+                    error={ticketSearchError}
+                    submittedQuery={ticketSearchSubmittedQuery}
+                    results={ticketSearchResults}
+                    selectedIds={selectedTicketIds}
+                    onQueryChange={setTicketSearchQuery}
+                    onSearch={() => runTicketCacheSearch()}
+                    onClear={handleClearTicketSearch}
+                    onSelectionChange={setSelection}
+                    onSelectAllVisible={setSelectionForMany}
+                    onOpenTicket={openTicket}
+                    onGenerateDigest={handleGenerateDigest}
+                    generatingDigest={generatingDigest}
+                  />
+
                   <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <WorkspaceMetricCard
                       label="Active Queue"
