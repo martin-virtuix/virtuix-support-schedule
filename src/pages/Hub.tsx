@@ -1465,7 +1465,7 @@ function TicketDrawer({
 
               {summary?.key_actions?.length ? (
                 <div className="mt-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Key Actions</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Troubleshooting</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
                     {summary.key_actions.map((action, idx) => (
                       <li key={idx}>{action}</li>

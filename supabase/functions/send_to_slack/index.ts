@@ -140,7 +140,7 @@ serve(async (req) => {
         ticket.ticket_url ? `URL: ${ticket.ticket_url}` : null,
         "",
         `Summary: ${summaryText}`,
-        keyActions.length > 0 ? `Key Actions:\n- ${(keyActions as string[]).join("\n- ")}` : null,
+        keyActions.length > 0 ? `Troubleshooting:\n- ${(keyActions as string[]).join("\n- ")}` : null,
         nextSteps.length > 0 ? `Next Steps:\n- ${(nextSteps as string[]).join("\n- ")}` : null,
       ].filter(Boolean);
 

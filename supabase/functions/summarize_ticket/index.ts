@@ -27,48 +27,49 @@ const OPENAI_MODEL_FALLBACKS = Deno.env.get("OPENAI_MODEL_FALLBACKS");
 const ZENDESK_SUBDOMAIN = Deno.env.get("ZENDESK_SUBDOMAIN");
 const ZENDESK_EMAIL = Deno.env.get("ZENDESK_EMAIL");
 const ZENDESK_API_TOKEN = Deno.env.get("ZENDESK_API_TOKEN");
-const DEFAULT_SUMMARY_SYSTEM_PROMPT = `You are a Technical Support Ticket Summary Specialist.
+const DEFAULT_SUMMARY_SYSTEM_PROMPT = `You are a Technical Support Ticket Embedding Summary Specialist.
 
 Your task:
-Read the full ticket conversation (including internal notes and public replies) and produce a SHORT operational summary.
+Read the full ticket conversation (including internal notes and public replies) and produce a SHORT retrieval-oriented summary.
 
-The goal is NOT to list every action taken.
-The goal is to quickly brief a support engineer or manager on the situation.
+The goal is to help semantic search and embeddings capture the real support signal from the ticket.
 
 ----------------------------------------
 CRITICAL RULES
 ----------------------------------------
 
 - Compress information aggressively.
-- Focus on the overall situation, not the full history.
-- Summarize patterns and outcomes rather than listing every message.
+- Include only:
+  1. the customer issue,
+  2. the troubleshooting already performed,
+  3. the current resolution outcome.
+- Focus on the technical situation and meaningful support work, not the full history.
+- Summarize real troubleshooting and outcome rather than listing every message.
 - If the ticket conversation is written fully or partially in a language other than English, translate the relevant content into English in the final summary.
-- Do NOT include long bullet lists.
+- Do NOT include requester identity details such as name, email, or phone.
+- Do NOT include ticket subject, greetings, apologies, scheduling chatter, handoff chatter, shipping/admin noise, or generic support phrasing unless essential to the technical issue.
+- Do NOT include recommended next steps, future follow-up plans, or what support "should" do next.
 - Do NOT repeat the conversation timeline.
-- Use short paragraphs instead of long lists.
+- Keep troubleshooting focused on meaningful steps already taken or confirmed.
 - The entire summary should remain compact and easy to read.
-
-If information such as email or phone is missing, write:
-"Not provided".
+- State clearly whether the issue is solved, not solved, pending customer, or unknown.
 
 ----------------------------------------
 OUTPUT FORMAT (FOLLOW EXACTLY)
 ----------------------------------------
 
-Ticket Subject:
-<subject>
+Issue:
+Write 2-3 concise sentences explaining the customer's problem and impact.
 
-Requester:
-<Name> | <Email> | <Phone or "Not provided">
+Troubleshooting:
+- Write 1-5 short bullets describing meaningful troubleshooting, validation, replacement, reset, configuration, or analysis steps already performed.
+- Do not include speculative future actions.
 
-Issue Summary:
-Write **2-3 concise sentences** explaining what the customer reported and the nature of the problem.
+Resolution Status:
+Write exactly one of: Solved, Not solved, Pending customer, Unknown
 
-Support Actions:
-Write **2-3 concise sentences** summarizing the troubleshooting performed, explanations given, or actions taken by the support team.
-
-Recommended Next Step:
-Write **1-2 concise sentences** describing what should happen next (waiting for customer, escalation, return process, confirmation, etc.).
+Resolution Details:
+Write 1 concise sentence describing the current outcome only.
 
 ----------------------------------------
 STYLE GUIDELINES
@@ -77,12 +78,19 @@ STYLE GUIDELINES
 - Be concise and direct.
 - Write the final summary in English only.
 - Prioritize clarity over detail.
-- Avoid bullet lists unless absolutely necessary.
 - Avoid repeating minor troubleshooting steps.
-- Focus on the big picture.
+- Focus on the technical signal that would help retrieve similar tickets later.
 
 The summary should be readable in **under 10 seconds**.`;
 const SUMMARY_SYSTEM_PROMPT = (Deno.env.get("SUMMARY_SYSTEM_PROMPT") || DEFAULT_SUMMARY_SYSTEM_PROMPT).trim();
+
+type ParsedSummarySections = {
+  fallbackSummary: string | null;
+  issue: string | null;
+  troubleshooting: string[];
+  resolutionStatus: string | null;
+  resolutionDetails: string | null;
+};
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -218,7 +226,65 @@ function stripListPrefix(value: string): string {
   return value.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").trim();
 }
 
-function parseSummaryAsJson(rawContent: string): SummaryPayload | null {
+function normalizeInlineText(value: string): string {
+  return stripListPrefix(value).replace(/\s+/g, " ").trim();
+}
+
+function appendUniqueLine(target: string[], value: string): void {
+  const normalized = normalizeInlineText(value);
+  if (!normalized) return;
+  if (!target.includes(normalized)) {
+    target.push(normalized);
+  }
+}
+
+function joinLines(lines: string[]): string | null {
+  const value = lines.map(normalizeInlineText).filter((entry) => entry.length > 0).join(" ").trim();
+  return value.length > 0 ? value : null;
+}
+
+function normalizeResolutionStatus(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (
+    normalized === "not solved" ||
+    normalized === "not resolved" ||
+    normalized === "unsolved" ||
+    normalized === "unresolved" ||
+    normalized.includes("not solved") ||
+    normalized.includes("not resolved") ||
+    normalized.includes("unresolved")
+  ) {
+    return "Not solved";
+  }
+  if (
+    normalized === "pending customer" ||
+    normalized.includes("waiting on customer") ||
+    normalized.includes("pending customer")
+  ) {
+    return "Pending customer";
+  }
+  if (normalized === "unknown" || normalized.includes("unknown")) {
+    return "Unknown";
+  }
+  if (normalized === "solved" || normalized === "closed" || normalized.includes("resolved")) {
+    return "Solved";
+  }
+
+  return value.trim();
+}
+
+function mapTicketStatusToResolutionStatus(value: unknown): string {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (["solved", "closed"].includes(normalized)) return "Solved";
+  if (["pending", "hold", "on-hold"].includes(normalized)) return "Pending customer";
+  if (["new", "open"].includes(normalized)) return "Not solved";
+  return "Unknown";
+}
+
+function parseSummaryAsJson(rawContent: string): ParsedSummarySections | null {
   try {
     const parsed = JSON.parse(rawContent) as Record<string, unknown>;
     const summary = typeof parsed.summary === "string"
@@ -227,24 +293,83 @@ function parseSummaryAsJson(rawContent: string): SummaryPayload | null {
         ? parsed.summary_text.trim()
         : "";
 
-    if (!summary && !Array.isArray(parsed.key_actions) && !Array.isArray(parsed.next_steps)) {
+    const issue = typeof parsed.issue === "string"
+      ? parsed.issue.trim()
+      : typeof parsed.issue_summary === "string"
+        ? parsed.issue_summary.trim()
+        : typeof parsed.issueSummary === "string"
+          ? parsed.issueSummary.trim()
+          : "";
+
+    const troubleshooting = sanitizeStringArray(
+      parsed.troubleshooting_steps ?? parsed.troubleshooting ?? parsed.key_actions,
+    );
+    const resolutionStatus = normalizeResolutionStatus(
+      typeof parsed.resolution_status === "string"
+        ? parsed.resolution_status
+        : typeof parsed.resolutionStatus === "string"
+          ? parsed.resolutionStatus
+          : typeof parsed.outcome === "string"
+            ? parsed.outcome
+            : typeof parsed.status === "string"
+              ? parsed.status
+              : null,
+    );
+    const resolutionDetails = typeof parsed.resolution_details === "string"
+      ? parsed.resolution_details.trim()
+      : typeof parsed.resolutionDetails === "string"
+        ? parsed.resolutionDetails.trim()
+        : "";
+
+    if (!summary && !issue && troubleshooting.length === 0 && !resolutionStatus && !resolutionDetails) {
       return null;
     }
 
     return {
-      summary: summary || "No summary generated.",
-      key_actions: sanitizeStringArray(parsed.key_actions),
-      next_steps: sanitizeStringArray(parsed.next_steps),
+      fallbackSummary: summary || null,
+      issue: issue || null,
+      troubleshooting,
+      resolutionStatus,
+      resolutionDetails: resolutionDetails || null,
     };
   } catch {
     return null;
   }
 }
 
-function parseStructuredSummary(rawContent: string): SummaryPayload {
-  const keyActions: string[] = [];
-  const nextSteps: string[] = [];
-  let section: "actions" | "next_steps" | null = null;
+function normalizeSectionName(value: string): "issue" | "troubleshooting" | "resolution_status" | "resolution_details" | null {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  if (normalized === "issue" || normalized === "issue summary") {
+    return "issue";
+  }
+  if (
+    normalized === "troubleshooting" ||
+    normalized === "support actions" ||
+    normalized === "actions taken / recommendations provided" ||
+    normalized === "actions taken/recommendations provided"
+  ) {
+    return "troubleshooting";
+  }
+  if (normalized === "resolution status") {
+    return "resolution_status";
+  }
+  if (
+    normalized === "resolution details" ||
+    normalized === "resolution" ||
+    normalized === "outcome" ||
+    normalized === "current outcome"
+  ) {
+    return "resolution_details";
+  }
+  return null;
+}
+
+function parseStructuredSummary(rawContent: string): ParsedSummarySections {
+  const issueLines: string[] = [];
+  const troubleshootingLines: string[] = [];
+  const resolutionStatusLines: string[] = [];
+  const resolutionDetailLines: string[] = [];
+  let section: ReturnType<typeof normalizeSectionName> = null;
 
   rawContent.split("\n").forEach((line) => {
     const trimmed = line.trim();
@@ -252,72 +377,86 @@ function parseStructuredSummary(rawContent: string): SummaryPayload {
       return;
     }
 
-    if (/^actions taken\s*\/\s*recommendations provided\s*:/i.test(trimmed)) {
-      section = "actions";
-      const inline = stripListPrefix(trimmed.replace(/^actions taken\s*\/\s*recommendations provided\s*:/i, "").trim());
-      if (inline) {
-        keyActions.push(inline);
+    const headerMatch = trimmed.match(/^([A-Za-z][A-Za-z /_-]+):\s*(.*)$/);
+    if (headerMatch) {
+      section = normalizeSectionName(headerMatch[1]);
+      const inline = headerMatch[2]?.trim();
+      if (!section || !inline) {
+        return;
+      }
+
+      if (section === "issue") {
+        appendUniqueLine(issueLines, inline);
+      } else if (section === "troubleshooting") {
+        appendUniqueLine(troubleshootingLines, inline);
+      } else if (section === "resolution_status") {
+        appendUniqueLine(resolutionStatusLines, inline);
+      } else if (section === "resolution_details") {
+        appendUniqueLine(resolutionDetailLines, inline);
       }
       return;
     }
 
-    if (/^recommended next step\s*:/i.test(trimmed)) {
-      section = "next_steps";
-      const inline = stripListPrefix(trimmed.replace(/^recommended next step\s*:/i, "").trim());
-      if (inline) {
-        nextSteps.push(inline);
-      }
-      return;
-    }
-
-    if (/^[a-z].*:\s*$/i.test(trimmed)) {
-      section = null;
-      return;
-    }
-
-    if (section === "actions") {
-      const value = stripListPrefix(trimmed);
-      if (value) {
-        keyActions.push(value);
-      }
-      return;
-    }
-
-    if (section === "next_steps") {
-      const value = stripListPrefix(trimmed);
-      if (value) {
-        nextSteps.push(value);
-      }
+    if (section === "issue") {
+      appendUniqueLine(issueLines, trimmed);
+    } else if (section === "troubleshooting") {
+      appendUniqueLine(troubleshootingLines, trimmed);
+    } else if (section === "resolution_status") {
+      appendUniqueLine(resolutionStatusLines, trimmed);
+    } else if (section === "resolution_details") {
+      appendUniqueLine(resolutionDetailLines, trimmed);
     }
   });
 
-  if (keyActions.length === 0 && nextSteps.length === 0) {
-    const lines = rawContent
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-
-    return {
-      summary: rawContent || "No summary generated.",
-      key_actions: lines.slice(0, 3),
-      next_steps: lines.slice(3, 6),
-    };
-  }
-
   return {
-    summary: rawContent || "No summary generated.",
-    key_actions: keyActions.slice(0, 6),
-    next_steps: nextSteps.slice(0, 6),
+    fallbackSummary: rawContent || null,
+    issue: joinLines(issueLines),
+    troubleshooting: troubleshootingLines.slice(0, 6),
+    resolutionStatus: normalizeResolutionStatus(joinLines(resolutionStatusLines)),
+    resolutionDetails: joinLines(resolutionDetailLines),
   };
 }
 
-function parseSummary(rawContent: string): SummaryPayload {
+function buildCanonicalSummary(
+  sections: ParsedSummarySections,
+  fallbackTicketStatus: unknown,
+): SummaryPayload {
+  const troubleshooting = sections.troubleshooting
+    .map(normalizeInlineText)
+    .filter((entry, index, array) => entry.length > 0 && array.indexOf(entry) === index)
+    .slice(0, 6);
+  const resolutionStatus = sections.resolutionStatus ?? mapTicketStatusToResolutionStatus(fallbackTicketStatus);
+  const resolutionDetails = sections.resolutionDetails ? normalizeInlineText(sections.resolutionDetails) : null;
+
+  const parts: string[] = [];
+  if (sections.issue) {
+    parts.push(`Issue:\n${sections.issue}`);
+  }
+  if (troubleshooting.length > 0) {
+    parts.push(`Troubleshooting:\n${troubleshooting.map((step) => `- ${step}`).join("\n")}`);
+  }
+  if (resolutionStatus || resolutionDetails) {
+    const resolutionLine =
+      resolutionStatus && resolutionDetails
+        ? resolutionDetails.toLowerCase().startsWith(resolutionStatus.toLowerCase())
+          ? resolutionDetails
+          : `${resolutionStatus}. ${resolutionDetails}`
+        : resolutionStatus ?? resolutionDetails ?? "";
+    parts.push(`Resolution:\n${resolutionLine}`);
+  }
+
+  return {
+    summary: parts.join("\n\n").trim() || sections.fallbackSummary || "No summary generated.",
+    key_actions: troubleshooting,
+    next_steps: [],
+  };
+}
+
+function parseSummary(rawContent: string, fallbackTicketStatus: unknown): SummaryPayload {
   const cleaned = cleanModelContent(rawContent);
   const parsedJson = parseSummaryAsJson(cleaned);
-  if (parsedJson) {
-    return parsedJson;
-  }
-  return parseStructuredSummary(cleaned);
+  const parsedSections = parsedJson ?? parseStructuredSummary(cleaned);
+  return buildCanonicalSummary(parsedSections, fallbackTicketStatus);
 }
 
 function compactTicketForPrompt(ticket: Record<string, unknown>): Record<string, unknown> {
@@ -378,7 +517,7 @@ async function generateSummary(ticket: Record<string, unknown>, comments: Array<
     ],
   });
 
-  const parsed = parseSummary(completion.content);
+  const parsed = parseSummary(completion.content, ticket.status);
   return {
     ...parsed,
     model: completion.model,
