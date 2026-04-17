@@ -7,7 +7,6 @@ import omniOneLogo from "@/assets/omnione_logo_color.png";
 import { cn } from "@/lib/utils";
 import {
   getHubVideoLibraryEntries,
-  HUB_VIDEO_LIBRARY,
   type HubVideoBrand,
   type HubVideoEntry,
 } from "@/lib/hubVideos";
@@ -146,21 +145,6 @@ function VideoCard({
           <p className="text-[13px] font-semibold leading-5 text-foreground/95 md:text-[14px]">{video.title}</p>
           <BrandPill brand={video.brand} compact />
         </div>
-        {video.description ? (
-          <p className="text-[12px] leading-5 text-muted-foreground">{video.description}</p>
-        ) : null}
-        {video.tags && video.tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {video.tags.map((tag) => (
-              <span
-                key={`${video.id}-${tag}`}
-                className="inline-flex items-center rounded-full border border-border/70 bg-background/55 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : null}
         <Button size="sm" variant="ghost" className="h-8 px-2.5" asChild>
           <a href={video.openUrl} target="_blank" rel="noreferrer">
             {video.sourceLabel}
@@ -178,7 +162,6 @@ export function VideosPane() {
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
 
   const parsedVideos = useMemo(() => getHubVideoLibraryEntries(), []);
-  const featuredCount = useMemo(() => parsedVideos.filter((video) => video.featured).length, [parsedVideos]);
   const brandCounts = useMemo(() => {
     const counts: Record<BrandFilter, number> = {
       all: parsedVideos.length,
@@ -211,7 +194,6 @@ export function VideosPane() {
 
   const activeVideo = filteredVideos.find((video) => video.id === activeVideoId) ?? filteredVideos[0] ?? null;
   const activeVideoPosition = activeVideo ? filteredVideos.findIndex((video) => video.id === activeVideo.id) + 1 : null;
-  const invalidEntries = Math.max(HUB_VIDEO_LIBRARY.length - parsedVideos.length, 0);
   const upNextVideos = useMemo(() => {
     if (!activeVideo) return filteredVideos.slice(0, 4);
     return filteredVideos.filter((video) => video.id !== activeVideo.id).slice(0, 4);
@@ -268,23 +250,6 @@ export function VideosPane() {
               )}
             </div>
 
-            {activeVideo.description ? (
-              <p className="text-[13px] leading-6 text-muted-foreground">{activeVideo.description}</p>
-            ) : null}
-
-            {activeVideo.tags && activeVideo.tags.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {activeVideo.tags.map((tag) => (
-                  <span
-                    key={`active-${activeVideo.id}-${tag}`}
-                    className="inline-flex items-center rounded-full border border-border/70 bg-background/55 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" asChild>
                 <a href={activeVideo.openUrl} target="_blank" rel="noreferrer">
@@ -339,33 +304,8 @@ export function VideosPane() {
           <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-primary/16 blur-3xl" />
           <div className="relative space-y-4">
             <div className="space-y-1.5">
-              <p className="brand-kicker">Knowledge Library</p>
-              <h2 className="font-display text-xl font-semibold tracking-tight md:text-2xl">Video Training Hub</h2>
-              <p className="max-w-3xl text-[14px] leading-6 text-muted-foreground md:text-[15px]">
-                Centralized walkthroughs and support playbooks for product and internal operations.
-              </p>
+              <h2 className="font-display text-xl font-semibold tracking-tight md:text-2xl">Videos</h2>
             </div>
-
-            <div className="grid gap-2 text-[12px] text-muted-foreground md:grid-cols-2 xl:grid-cols-1">
-              <p className="surface-panel-soft px-3 py-2">
-                <span className="text-[13px] font-semibold text-foreground">{parsedVideos.length}</span> videos in library
-              </p>
-              <p className="surface-panel-soft px-3 py-2">
-                <span className="text-[13px] font-semibold text-foreground">{filteredVideos.length}</span> matches
-              </p>
-              <p className="surface-panel-soft px-3 py-2">
-                <span className="text-[13px] font-semibold text-foreground">{featuredCount}</span> featured picks
-              </p>
-              <p className="surface-panel-soft px-3 py-2">
-                Source file: <span className="font-medium text-foreground">src/lib/hubVideos.ts</span>
-              </p>
-            </div>
-
-            {invalidEntries > 0 ? (
-              <p className="text-[12px] text-destructive">
-                {invalidEntries} video link{invalidEntries > 1 ? "s were" : " was"} skipped due to invalid URLs.
-              </p>
-            ) : null}
 
             <div className="grid gap-3">
               <div className="relative">
@@ -410,7 +350,7 @@ export function VideosPane() {
         {filteredVideos.length === 0 ? (
           <section className="surface-panel-soft p-6 text-sm text-muted-foreground">
             {parsedVideos.length === 0
-              ? "No videos yet. Add links in src/lib/hubVideos.ts and this view will populate automatically."
+              ? "No videos yet."
               : "No videos match the current search/filter."}
           </section>
         ) : (

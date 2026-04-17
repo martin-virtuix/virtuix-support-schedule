@@ -144,6 +144,12 @@ function parseLatestUserQuery(messages: ChatMessage[]): string {
   return "";
 }
 
+function queryExplicitlyAsksForActions(query: string): boolean {
+  return /\b(next steps?|next actions?|action items?|recommended actions?|recommend(?:ation|ations)?|what should (?:we|i) do|how should (?:we|i) proceed|what now|what's the plan|best actions?)\b/i.test(
+    query,
+  );
+}
+
 function toVectorLiteral(embedding: number[]): string {
   return `[${embedding.map((value) => value.toFixed(10)).join(",")}]`;
 }
@@ -549,6 +555,7 @@ serve(async (req) => {
     }
 
     const latestQuery = parseLatestUserQuery(messages);
+    const explicitlyAskedForActions = queryExplicitlyAsksForActions(latestQuery);
     let documentCitations: CopilotCitation[] = [];
     let ticketCitations: CopilotCitation[] = [];
     if (latestQuery.length > 0 && supabaseAdmin) {
@@ -570,11 +577,14 @@ serve(async (req) => {
 
     const systemPrompt = [
       "You are Virtuix Support Copilot.",
-      "Be concise, practical, and action-oriented.",
-      "Focus on queue triage, digest planning, support operations, and next best actions.",
+      "Be concise, practical, and grounded in the retrieved evidence.",
+      "Answer the user's actual question directly before offering any recommendations.",
       "If evidence is provided, ground your answer in it and cite markers like [DOC1] or [TICKET1].",
       "If evidence is not enough, say exactly what is missing.",
-      "Prefer bullet points for plans and include specific next steps.",
+      explicitlyAskedForActions
+        ? "The user explicitly asked for recommendations or next steps, so include a short actions section only if it is supported by the evidence."
+        : "Do not include a 'next steps', 'next best actions', or recommendation section unless the user explicitly asks for it.",
+      "Use short paragraphs by default. Use bullets only when they clearly improve readability.",
       `Current context: omni_one=${context.omni_one_ticket_count ?? "unknown"}, omni_arena=${context.omni_arena_ticket_count ?? "unknown"}, digests=${context.digest_count ?? "unknown"}`,
     ].join(" ");
 

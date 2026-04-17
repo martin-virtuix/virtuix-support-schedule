@@ -794,14 +794,18 @@ function WorkspaceMetricCard({ label, value, detail, accent = false }: Workspace
   return (
     <article
       className={[
-        "rounded-2xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_-28px_hsl(var(--primary)/0.88)]",
+        "group relative overflow-hidden rounded-[1.35rem] border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_42px_-30px_hsl(var(--primary)/0.88)]",
         accent
           ? "border-primary/45 bg-primary/[0.12] hover:border-primary/65"
           : "border-border/70 bg-background/45 hover:border-primary/45 hover:bg-background/60",
       ].join(" ")}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tracking-tight md:text-[1.75rem]">{value}</p>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/45 to-transparent opacity-60" />
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
+        <span className={`h-2.5 w-2.5 rounded-full ${accent ? "bg-primary shadow-[0_0_0_4px_hsl(var(--primary)/0.15)]" : "bg-border"}`} />
+      </div>
+      <p className="mt-3 text-2xl font-semibold tracking-tight md:text-[1.85rem]">{value}</p>
       <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{detail}</p>
     </article>
   );
@@ -859,28 +863,35 @@ function SideNavigation({
   lastSync: SyncSummary | null;
 }) {
   const linkClasses =
-    "rounded-xl border border-transparent px-3.5 py-3 text-left transition hover:border-border/75 hover:bg-muted/45";
-  const activeClasses = "border-primary/40 bg-primary/12 text-primary";
+    "group rounded-[1.2rem] border px-3.5 py-3 text-left transition hover:border-primary/25 hover:bg-background/75 hover:shadow-[0_18px_36px_-32px_hsl(var(--primary)/0.85)]";
+  const activeClasses = "border-primary/45 bg-primary/12 text-primary shadow-[0_18px_38px_-34px_hsl(var(--primary)/0.95)]";
 
   return (
-    <div className="flex h-full flex-col surface-panel p-4">
+    <div className="flex h-full flex-col surface-panel p-5">
       <div className="mb-5 space-y-4">
         <BrandLockup size="sm" showOmniOne={false} accessoryLabel="Support Hub" />
 
-        <div className="rounded-2xl border border-border/70 bg-background/45 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Workspace Snapshot</p>
-          <p className="mt-2 text-3xl font-semibold tracking-tight">{allTicketCount}</p>
-          <p className="text-[12px] leading-5 text-muted-foreground">Cached tickets across both support brands.</p>
-          <div className="mt-4 space-y-2 text-[12px] leading-5 text-muted-foreground">
-            <p>
-              Active backlog: <span className="font-medium text-foreground">{activeBacklogCount}</span>
-            </p>
-            <p>
-              Last sync:{" "}
-              <span className="font-medium text-foreground">
-                {lastSync?.finishedAt ? formatDateTime(lastSync.finishedAt) : "Not available"}
-              </span>
-            </p>
+        <div className="relative overflow-hidden rounded-[1.45rem] border border-primary/20 bg-gradient-to-br from-primary/[0.14] via-background/92 to-background/78 p-4">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-primary/16 blur-3xl" />
+          <div className="relative">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">Workspace Snapshot</p>
+              <span className="brand-chip border-primary/35 bg-primary/12 text-primary">Live</span>
+            </div>
+            <p className="mt-4 text-4xl font-semibold tracking-tight">{allTicketCount}</p>
+            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">Cached tickets across both support brands.</p>
+            <div className="mt-4 grid gap-3">
+              <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Active backlog</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{activeBacklogCount}</p>
+              </div>
+              <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Last sync</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {lastSync?.finishedAt ? formatDateTime(lastSync.finishedAt) : "Not available"}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -895,13 +906,16 @@ function SideNavigation({
             className={({ isActive }) => `${linkClasses} ${isActive ? activeClasses : "text-foreground"}`}
           >
             <span className="block text-[14px] font-medium">{route.label}</span>
-            <span className="mt-1 block text-[12px] leading-5 text-muted-foreground">{route.description}</span>
+            <span className="mt-1 block text-[12px] leading-5 text-muted-foreground transition-colors group-hover:text-foreground/80">
+              {route.description}
+            </span>
           </NavLink>
         ))}
       </nav>
 
-      <div className="mt-auto space-y-3 rounded-xl border border-border/65 bg-background/45 p-3">
-        <p className="break-all text-[12px] leading-5 text-muted-foreground">{userEmail}</p>
+      <div className="mt-auto space-y-3 rounded-[1.2rem] border border-border/65 bg-background/45 p-3.5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Signed in</p>
+        <p className="break-all text-[12px] leading-5 text-foreground/80">{userEmail}</p>
         <Button variant="secondary" className="w-full" onClick={onSignOut}>
           Sign out
         </Button>
@@ -1180,16 +1194,7 @@ function TicketSearchPane({
   return (
     <section className="surface-panel space-y-4 p-5 md:p-6">
       <div className="flex flex-col gap-4 border-b border-border/55 pb-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Cached Ticket Search</p>
-            <h2 className="mt-1 font-display text-2xl tracking-tight">Search All Cached Tickets</h2>
-          </div>
-          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-            Searches cached subject, requester, assignee, AI summary, and ticket description fields across all brands. V1 does
-            not search public replies or internal notes.
-          </p>
-        </div>
+        <h2 className="font-display text-2xl tracking-tight">Search Cached Tickets</h2>
 
         <div className="text-xs text-muted-foreground lg:text-right">
           {selectedTotalCount > 0 ? `${selectedTotalCount} selected across queues and search results` : "No tickets selected"}
@@ -1244,17 +1249,6 @@ function TicketSearchPane({
           </Button>
         </div>
       </form>
-
-      <div className="rounded-xl border border-border/65 bg-background/35 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
-        {submittedQuery
-          ? (
-            <>
-              Showing <span className="font-medium text-foreground">{results.length}</span> cached matches for{" "}
-              <span className="font-medium text-foreground">&quot;{submittedQuery}&quot;</span>.
-            </>
-          )
-          : "Run a search to scan the full cached ticket set instead of only the latest queue snapshot."}
-      </div>
 
       <div className="space-y-2 lg:hidden">
         {loading ? (
@@ -1545,10 +1539,7 @@ function DigestsPane({
         {selected ? (
           <div className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-xl font-semibold tracking-tight">{selected.title}</h2>
-                <p className="text-[12px] text-muted-foreground">{formatDateTime(selected.created_at)} • Source: {selected.source}</p>
-              </div>
+              <h2 className="text-xl font-semibold tracking-tight">{selected.title}</h2>
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => void onSendToSlack(selected.id)}>
                   <Send className="mr-2 h-4 w-4" />
@@ -1655,7 +1646,6 @@ function DocumentsPane({
     [activeBrand, activeDocuments, activeTopLevelFolder],
   );
   const selectedDocument = allDocuments.find((document) => document.path === selectedDocumentPath) || null;
-  const activeFolderLabel = activeTopLevelFolder || "All folders";
   const previewUrlWithPage = previewUrl && previewPageNumber ? `${previewUrl}#page=${previewPageNumber}` : previewUrl;
 
   return (
@@ -1667,26 +1657,6 @@ function DocumentsPane({
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Refresh
           </Button>
-        </div>
-
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-border/70 bg-card/68 p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">PDF Library</p>
-            <p className="mt-1 text-2xl font-semibold tracking-tight">{allDocuments.length}</p>
-            <p className="text-[12px] leading-5 text-muted-foreground">Documents currently available in the library.</p>
-          </div>
-          <div className="rounded-xl border border-border/70 bg-card/68 p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Current Scope</p>
-            <p className="mt-1 text-lg font-semibold tracking-tight">{activeFolderLabel}</p>
-            <p className="text-[12px] leading-5 text-muted-foreground">{filteredDocuments.length} docs in current view.</p>
-          </div>
-          <div className="rounded-xl border border-border/70 bg-card/68 p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Search Matches</p>
-            <p className="mt-1 text-2xl font-semibold tracking-tight">{semanticResults.length}</p>
-            <p className="text-[12px] leading-5 text-muted-foreground">
-              {semanticQuery.trim() ? `Current query: ${semanticQuery.trim()}` : "Run semantic search in the active scope."}
-            </p>
-          </div>
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2">
@@ -1739,11 +1709,6 @@ function DocumentsPane({
           ))}
         </div>
 
-        <p className="mb-3 text-[12px] text-muted-foreground">
-          Bucket: <span className="font-medium text-foreground">{SUPPORT_DOCUMENTS_BUCKET}</span> • Expected folders:
-          {" "}omni_one, omni_arena
-        </p>
-
         <form
           className="mb-3 space-y-2"
           onSubmit={(event) => {
@@ -1769,7 +1734,6 @@ function DocumentsPane({
             </Button>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[12px] text-muted-foreground">Searches indexed chunks for this selected scope.</p>
             {(semanticResults.length > 0 || semanticError) && !semanticSearching ? (
               <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={onClearSemanticSearch}>
                 Clear
@@ -1846,7 +1810,6 @@ function DocumentsPane({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-semibold tracking-tight">{selectedDocument.name}</h2>
-                <p className="text-[12px] text-muted-foreground">Path: {selectedDocument.path}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -2038,12 +2001,7 @@ function ReportsPane({
   return (
     <section className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
       <div className="surface-panel space-y-4 p-5">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">High-Impact Ticket Report</h2>
-          <p className="mt-1 text-[13px] leading-6 text-muted-foreground">
-            Simplified for weekly execution: intake trend, active backlog, top issues, and top caller activity.
-          </p>
-        </div>
+        <h2 className="text-xl font-semibold tracking-tight">High-Impact Ticket Report</h2>
 
         <div className="surface-panel-soft space-y-2 p-3">
           <label htmlFor="week-start" className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -2095,9 +2053,6 @@ function ReportsPane({
             {dispatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
             Send Test to Slack + Email
           </Button>
-          <p className="text-[12px] leading-5 text-muted-foreground">
-            Preview does not send anything. Send Test runs the full dispatch immediately.
-          </p>
           {dispatchPreview ? (
             <>
               <div className="max-h-48 overflow-y-auto rounded-lg border border-border/65 bg-background/55 p-2">
@@ -2118,19 +2073,6 @@ function ReportsPane({
           <p className="text-sm text-destructive">{error}</p>
         ) : (
           <>
-            <div className="surface-panel-soft p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Report Window</p>
-              <p className="mt-1 text-[15px] font-medium">{periodLabel || "-"}</p>
-              {previousPeriodLabel ? (
-                <p className="mt-1 text-[12px] text-muted-foreground">Compared against: {previousPeriodLabel}</p>
-              ) : null}
-              {totalRow ? (
-                <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-                  Weekly intake snapshot: {totalRow.received_count} tickets received across all brands.
-                </p>
-              ) : null}
-            </div>
-
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {summaryRows.map(({ brand, current, previous, delta }) => (
                 <article
@@ -2146,7 +2088,6 @@ function ReportsPane({
                     {labels[brand] ?? brand}
                   </p>
                   <p className="mt-2 text-3xl font-semibold tracking-tight">{current.received_count}</p>
-                  <p className="text-[12px] text-muted-foreground">Tickets received</p>
                   <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
                     WoW: {delta === null ? "n/a" : formatSignedIntDelta(delta)}
                     {previous ? ` (Prev ${previous.received_count})` : ""}
@@ -2156,12 +2097,7 @@ function ReportsPane({
             </div>
 
             <article className="surface-panel-soft space-y-3 p-4">
-              <div>
-                <h3 className="text-lg font-semibold tracking-tight">Monthly / Quarterly / Yearly Intake</h3>
-                <p className="text-[12px] leading-5 text-muted-foreground">
-                  Snapshot by current reference date, with previous-period comparison.
-                </p>
-              </div>
+              <h3 className="text-lg font-semibold tracking-tight">Monthly / Quarterly / Yearly Intake</h3>
 
               {receivedRollupLoading ? (
                 <p className="text-[13px] text-muted-foreground">Loading intake view...</p>
@@ -2232,12 +2168,8 @@ function ReportsPane({
 
             <div className="grid items-stretch gap-4 xl:grid-cols-2">
               <article className="surface-panel-soft h-full space-y-3 p-4">
-                <div>
-                  <h3 className="text-lg font-semibold tracking-tight">Currently Open Tickets</h3>
-                  <p className="text-[12px] leading-5 text-muted-foreground">Open + Pending queue only.</p>
-                </div>
+                <h3 className="text-lg font-semibold tracking-tight">Currently Open Tickets</h3>
                 <p className="text-2xl font-semibold tracking-tight">{totalBacklogCount}</p>
-                <p className="text-[12px] text-muted-foreground">Total active tickets across both queues.</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border/65 bg-background/55 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/55 hover:bg-background/65 hover:shadow-[0_14px_30px_-24px_hsl(var(--primary)/0.9)]">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni One</p>
@@ -2257,10 +2189,7 @@ function ReportsPane({
               </article>
 
               <article className="surface-panel-soft h-full space-y-3 p-4">
-                <div>
-                  <h3 className="text-lg font-semibold tracking-tight">Top Issue Themes</h3>
-                  <p className="text-[12px] leading-5 text-muted-foreground">Top 3 from active queue subjects.</p>
-                </div>
+                <h3 className="text-lg font-semibold tracking-tight">Top Issue Themes</h3>
                 <div className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr">
                   <div className="h-full rounded-lg border border-border/65 bg-background/55 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Omni One</p>
@@ -2298,12 +2227,7 @@ function ReportsPane({
             </div>
 
             <article className="surface-panel-soft space-y-3 p-4">
-              <div>
-                <h3 className="text-lg font-semibold tracking-tight">Top Arena Callers / Venues</h3>
-                <p className="text-[12px] leading-5 text-muted-foreground">
-                  Top requesters in the current open + pending arena queue.
-                </p>
-              </div>
+              <h3 className="text-lg font-semibold tracking-tight">Top Arena Callers / Venues</h3>
 
               {omniArenaTopCallers.length === 0 ? (
                 <p className="text-[13px] text-muted-foreground">No active arena tickets.</p>
@@ -3840,31 +3764,26 @@ export default function Hub() {
     { key: "videos", label: "Videos", path: "/hub/videos", active: inVideosRoute, description: "Training and repair video library" },
     { key: "reports", label: "Reports", path: "/hub/reports", active: inReportsRoute, description: "Weekly reporting and dispatch" },
   ];
-  const activeViewMeta: Record<HubViewKey, { kicker: string; title: string; description: string }> = {
+  const activeViewMeta: Record<HubViewKey, { kicker: string; title: string }> = {
     tickets: {
       kicker: "Operations Console",
       title: "Ticket Operations",
-      description: "Review active Zendesk workload, open ticket detail, build digests, and monitor venue coverage from one workspace.",
     },
     digests: {
       kicker: "Operational Summaries",
       title: "Queue Digests",
-      description: "Keep recent AI-generated digests visible so handoffs, escalation notes, and queue snapshots stay reusable.",
     },
     documents: {
       kicker: "Knowledge Base",
       title: "Support Documents",
-      description: "Browse product PDFs, narrow by folder, and use semantic search to jump straight to the right reference material.",
     },
     videos: {
       kicker: "Training Library",
       title: "Support Videos",
-      description: "A curated library for repair, setup, and troubleshooting videos.",
     },
     reports: {
       kicker: "Reporting",
       title: "Weekly Ticket Reporting",
-      description: "Track intake trends, active backlog, and dispatch-ready summaries without leaving the hub.",
     },
   };
   const workspaceMetrics: WorkspaceMetric[] = (() => {
@@ -4087,37 +4006,28 @@ export default function Hub() {
           </aside>
 
           <section className="space-y-5">
-            <section className="surface-panel reveal-up relative overflow-hidden p-6 md:p-7">
+            <section className="surface-panel reveal-up relative overflow-hidden p-0">
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-primary/18 blur-3xl" />
-              <div className="relative space-y-5">
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="relative grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="space-y-5 p-6 md:p-7">
                   <div className="space-y-4">
                     <div className="space-y-1.5">
                       <p className="brand-kicker">{currentViewMeta.kicker}</p>
                       <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight md:text-4xl">
                         {currentViewMeta.title}
                       </h1>
-                      <p className="max-w-3xl text-[15px] leading-6 text-muted-foreground md:text-[16px]">
-                        {currentViewMeta.description}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {routeTabs.map((tab) => (
-                        <Button
-                          key={tab.path}
-                          size="sm"
-                          variant={tab.active ? "secondary" : "ghost"}
-                          className={tab.active ? "border-primary/40 bg-primary/12 text-primary" : ""}
-                          onClick={() => navigate(tab.path)}
-                        >
-                          {tab.label}
-                        </Button>
-                      ))}
                     </div>
                   </div>
 
-                  <div className="surface-panel-soft space-y-3 p-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {workspaceMetrics.map((metric) => (
+                      <WorkspaceMetricCard key={metric.label} {...metric} />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-border/55 bg-gradient-to-b from-background/82 to-background/56 p-6 xl:border-l xl:border-t-0 xl:p-7">
+                  <div className="space-y-3 rounded-[1.35rem] border border-border/65 bg-card/55 p-4">
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Data Sync</p>
                       <p className="mt-2 text-2xl font-semibold tracking-tight">{lastSync?.status || "Not available"}</p>
@@ -4133,24 +4043,22 @@ export default function Hub() {
                         {syncMessage}
                       </p>
                     ) : null}
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button onClick={handleSyncNow} disabled={syncLoading}>
-                        {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                        {syncLoading ? "Syncing..." : "Sync Zendesk"}
-                      </Button>
-                      <Button variant="outline" onClick={handleBackfillOneYear} disabled={syncLoading}>
-                        {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                        {syncLoading ? "Running..." : "Backfill 1 Year"}
-                      </Button>
-                    </div>
                   </div>
-                </div>
 
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  {workspaceMetrics.map((metric) => (
-                    <WorkspaceMetricCard key={metric.label} {...metric} />
-                  ))}
+                  <div className="rounded-[1.35rem] border border-primary/18 bg-gradient-to-br from-primary/[0.12] via-background/90 to-background/75 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">Copilot</p>
+                    <p className="mt-2 text-lg font-semibold tracking-tight">Wider ticket recall workspace</p>
+                    <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                      Ask naturally, compare similar tickets, and jump straight into referenced Zendesk cases from the dock.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleSyncNow} disabled={syncLoading}>
+                      {syncLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                      {syncLoading ? "Syncing..." : "Sync Zendesk"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -4273,10 +4181,7 @@ export default function Hub() {
                           <span className="brand-logo-shell h-10 min-w-[76px] px-3">
                             <img src={omniOneLogo} alt="Omni One" className="h-5 w-auto" />
                           </span>
-                          <div>
-                            <p className="text-base font-semibold tracking-tight">Omni One</p>
-                            <p className="mt-1 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
-                          </div>
+                          <p className="text-base font-semibold tracking-tight">Omni One</p>
                         </div>
                         <span className="brand-chip">{omniOneTickets.length} tickets</span>
                       </div>
@@ -4299,10 +4204,7 @@ export default function Hub() {
                           <span className="brand-logo-shell h-10 min-w-[84px] px-3">
                             <img src={omniArenaLogo} alt="Omni Arena" className="h-[16px] w-auto" />
                           </span>
-                          <div>
-                            <p className="text-base font-semibold tracking-tight">Omni Arena</p>
-                            <p className="mt-1 text-sm text-muted-foreground">Zendesk queue snapshot.</p>
-                          </div>
+                          <p className="text-base font-semibold tracking-tight">Omni Arena</p>
                         </div>
                         <span className="brand-chip">{omniArenaTickets.length} tickets</span>
                       </div>
@@ -4325,12 +4227,7 @@ export default function Hub() {
                           <span className="brand-logo-shell h-10 min-w-[84px] px-3">
                             <img src={omniArenaLogo} alt="Omni Arena" className="h-[16px] w-auto" />
                           </span>
-                          <div>
-                            <p className="text-base font-semibold tracking-tight">Arena Sites</p>
-                            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                              Filter and search venue coverage status without leaving the ticket workspace.
-                            </p>
-                          </div>
+                          <p className="text-base font-semibold tracking-tight">Arena Sites</p>
                         </div>
                         <span className="brand-chip">{sites.length} venues</span>
                       </div>

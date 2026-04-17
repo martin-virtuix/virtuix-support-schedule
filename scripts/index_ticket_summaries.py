@@ -159,6 +159,9 @@ class SupabaseHttpClient:
     *,
     brand: str | None,
     ticket_id: int | None,
+    ticket_id_min: int | None,
+    ticket_id_max: int | None,
+    order: str,
     limit: int,
     offset: int,
   ) -> list[TicketSummaryRecord]:
@@ -166,7 +169,7 @@ class SupabaseHttpClient:
       "select": "ticket_id,brand,status,subject,ticket_url,zendesk_updated_at,summary_text,summary_updated_at",
       "summary_text": "not.is.null",
       "status": "not.in.(spam,deleted)",
-      "order": "ticket_id.asc",
+      "order": f"ticket_id.{order}",
       "limit": limit,
       "offset": offset,
     }
@@ -174,6 +177,14 @@ class SupabaseHttpClient:
       params["brand"] = f"eq.{brand}"
     if ticket_id is not None:
       params["ticket_id"] = f"eq.{ticket_id}"
+    else:
+      ticket_range_filters: list[str] = []
+      if ticket_id_min is not None:
+        ticket_range_filters.append(f"ticket_id.gte.{ticket_id_min}")
+      if ticket_id_max is not None:
+        ticket_range_filters.append(f"ticket_id.lte.{ticket_id_max}")
+      if ticket_range_filters:
+        params["and"] = f"({','.join(ticket_range_filters)})"
 
     data = self._request(
       "GET",
@@ -374,6 +385,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="Index summarized support tickets for semantic search.")
   parser.add_argument("--brand", choices=["all", "omni_one", "omni_arena", "unknown"], default="all")
   parser.add_argument("--ticket-id", type=int, default=None, help="Index one summarized ticket by id.")
+  parser.add_argument("--ticket-id-min", type=int, default=None, help="Only consider tickets with id >= this value.")
+  parser.add_argument("--ticket-id-max", type=int, default=None, help="Only consider tickets with id <= this value.")
+  parser.add_argument("--order", choices=["asc", "desc"], default="asc", help="Process ticket ids in ascending or descending order.")
   parser.add_argument("--max-tickets", type=int, default=None)
   parser.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE)
   parser.add_argument("--force", action="store_true", help="Reindex summarized tickets even if unchanged.")
@@ -391,6 +405,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
   load_dotenv(Path(".env"))
   args = parse_args(argv)
+
+  if args.ticket_id_min is not None and args.ticket_id_max is not None and args.ticket_id_min > args.ticket_id_max:
+    print("--ticket-id-min cannot be greater than --ticket-id-max.")
+    return 1
 
   supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL")
   service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -427,6 +445,9 @@ def main(argv: list[str]) -> int:
     records = client.list_summarized_tickets(
       brand=brand_filter,
       ticket_id=args.ticket_id,
+      ticket_id_min=args.ticket_id_min,
+      ticket_id_max=args.ticket_id_max,
+      order=args.order,
       limit=page_size,
       offset=offset,
     )
