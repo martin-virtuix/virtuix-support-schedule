@@ -538,7 +538,7 @@ serve(async (req) => {
   }
 
   try {
-    await authorizeVirtuixRequest(req, { functionName: "summarize_ticket" });
+    await authorizeVirtuixRequest(req, { allowServiceRole: true, functionName: "summarize_ticket" });
 
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const ticketId =

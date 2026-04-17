@@ -41,6 +41,20 @@ type SupportDocumentChunkMatch = {
   similarity: number;
 };
 
+type TicketEmbeddingMatch = {
+  chunk_id: string;
+  ticket_id: number;
+  brand: string;
+  status: string;
+  subject: string;
+  ticket_url: string | null;
+  zendesk_updated_at: string | null;
+  source: string;
+  chunk_index: number;
+  content_text: string;
+  similarity: number;
+};
+
 type TicketCandidate = {
   ticket_id: number;
   brand: string;
@@ -64,6 +78,8 @@ const OPENAI_EMBEDDING_MODEL = Deno.env.get("OPENAI_EMBEDDING_MODEL") || "text-e
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const ACTIVE_TICKET_STATUSES = new Set(["new", "open", "pending"]);
+const CANONICAL_TICKET_SUMMARY_MARKERS = ["Issue:", "Troubleshooting:", "Resolution:"];
+const LEGACY_TICKET_SUMMARY_MARKERS = ["Ticket Subject:", "Requester:", "Issue Summary:", "Support Actions:", "Recommended Next Step:"];
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -108,6 +124,15 @@ function compactSnippet(value: string | null | undefined, maxLength = 260): stri
   if (compact.length === 0) return null;
   if (compact.length <= maxLength) return compact;
   return `${compact.slice(0, maxLength - 1)}…`;
+}
+
+function isCanonicalTicketSummaryContent(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const summary = value.trim();
+  if (!summary) return false;
+  const hasCanonicalMarkers = CANONICAL_TICKET_SUMMARY_MARKERS.every((marker) => summary.includes(marker));
+  const hasLegacyMarkers = LEGACY_TICKET_SUMMARY_MARKERS.some((marker) => summary.includes(marker));
+  return hasCanonicalMarkers && !hasLegacyMarkers;
 }
 
 function parseLatestUserQuery(messages: ChatMessage[]): string {
@@ -220,6 +245,56 @@ function toTicketCandidate(value: unknown): TicketCandidate | null {
   };
 }
 
+function toTicketEmbeddingMatch(value: unknown): TicketEmbeddingMatch | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const chunkId = normalizeOptionalString(row.chunk_id);
+  const ticketId = typeof row.ticket_id === "number" && Number.isFinite(row.ticket_id) ? Math.trunc(row.ticket_id) : null;
+  const brand = normalizeOptionalString(row.brand);
+  const status = normalizeOptionalString(row.status);
+  const subject = normalizeOptionalString(row.subject);
+  const ticketUrl = normalizeOptionalString(row.ticket_url);
+  const zendeskUpdatedAt = normalizeOptionalString(row.zendesk_updated_at);
+  const source = normalizeOptionalString(row.source);
+  const contentText = normalizeOptionalString(row.content_text);
+  const chunkIndex = typeof row.chunk_index === "number" && Number.isFinite(row.chunk_index)
+    ? Math.trunc(row.chunk_index)
+    : null;
+  const similarity = typeof row.similarity === "number" && Number.isFinite(row.similarity) ? row.similarity : null;
+
+  if (!chunkId || !ticketId || !brand || !status || !subject || !source || contentText === null || chunkIndex === null || similarity === null) {
+    return null;
+  }
+
+  return {
+    chunk_id: chunkId,
+    ticket_id: ticketId,
+    brand,
+    status,
+    subject,
+    ticket_url: ticketUrl,
+    zendesk_updated_at: zendeskUpdatedAt,
+    source,
+    chunk_index: chunkIndex,
+    content_text: contentText,
+    similarity,
+  };
+}
+
+function parseExplicitTicketId(queryLower: string): number | null {
+  const explicitTicketIdMatch = queryLower.match(/(?:^|\s)#?(\d{4,})\b/);
+  return explicitTicketIdMatch ? Number.parseInt(explicitTicketIdMatch[1], 10) : null;
+}
+
+function parseQueryTokens(queryLower: string): string[] {
+  return Array.from(new Set(
+    queryLower
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3),
+  )).slice(0, 12);
+}
+
 function scoreTicket(queryLower: string, tokens: string[], ticket: TicketCandidate, explicitTicketId: number | null): number {
   let score = 0;
   const subjectLower = ticket.subject.toLowerCase();
@@ -250,14 +325,14 @@ function scoreTicket(queryLower: string, tokens: string[], ticket: TicketCandida
 async function fetchDocumentCitations(
   supabaseAdmin: ReturnType<typeof createClient>,
   query: string,
+  queryEmbedding: number[] | null,
 ): Promise<CopilotCitation[]> {
-  if (query.trim().length === 0) return [];
+  if (query.trim().length === 0 || !queryEmbedding) return [];
 
   try {
-    const embedding = await createQueryEmbedding(query);
-    const queryEmbedding = toVectorLiteral(embedding);
-    const { data, error } = await (supabaseAdmin as any).rpc("match_support_document_chunks", {
-      query_embedding: queryEmbedding,
+    const queryEmbeddingLiteral = toVectorLiteral(queryEmbedding);
+    const { data, error } = await supabaseAdmin.rpc("match_support_document_chunks", {
+      query_embedding: queryEmbeddingLiteral,
       match_count: 4,
       match_brand: null,
       match_top_level_folder: null,
@@ -289,21 +364,59 @@ async function fetchDocumentCitations(
   }
 }
 
-async function fetchTicketCitations(
+async function fetchSemanticTicketCitations(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  queryEmbedding: number[] | null,
+): Promise<CopilotCitation[]> {
+  if (!queryEmbedding) return [];
+
+  try {
+    const queryEmbeddingLiteral = toVectorLiteral(queryEmbedding);
+    const { data, error } = await supabaseAdmin.rpc("match_ticket_embedding_chunks", {
+      query_embedding: queryEmbeddingLiteral,
+      match_count: 4,
+      match_brand: null,
+      match_status: null,
+      min_similarity: 0.15,
+    });
+
+    if (error) {
+      console.warn("Ticket semantic retrieval failed", error.message);
+      return [];
+    }
+
+    const rawRows = Array.isArray(data) ? data as unknown[] : [];
+    const rows = rawRows
+      .map(toTicketEmbeddingMatch)
+      .filter((row): row is TicketEmbeddingMatch => row !== null)
+      .filter((row) => isCanonicalTicketSummaryContent(row.content_text));
+    return rows.slice(0, 4).map((row, index) => ({
+      source_type: "ticket" as const,
+      title: `Ticket ${index + 1}: #${row.ticket_id}`,
+      reference: `#${row.ticket_id} • ${row.brand} • ${row.status}`,
+      url: row.ticket_url,
+      excerpt: compactSnippet(row.content_text),
+      similarity: Number(row.similarity.toFixed(4)),
+      ticket_id: row.ticket_id,
+      brand: row.brand,
+      status: row.status,
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown ticket semantic retrieval error";
+    console.warn("Ticket semantic retrieval failed", message);
+    return [];
+  }
+}
+
+async function fetchLexicalTicketCitations(
   supabaseAdmin: ReturnType<typeof createClient>,
   query: string,
 ): Promise<CopilotCitation[]> {
   const queryLower = query.trim().toLowerCase();
   if (queryLower.length === 0) return [];
 
-  const explicitTicketIdMatch = queryLower.match(/(?:^|\s)#?(\d{4,})\b/);
-  const explicitTicketId = explicitTicketIdMatch ? Number.parseInt(explicitTicketIdMatch[1], 10) : null;
-  const tokens = Array.from(new Set(
-    queryLower
-      .split(/[^a-z0-9]+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 3),
-  )).slice(0, 12);
+  const explicitTicketId = parseExplicitTicketId(queryLower);
+  const tokens = parseQueryTokens(queryLower);
 
   const { data, error } = await supabaseAdmin
     .from("ticket_cache")
@@ -342,6 +455,48 @@ async function fetchTicketCitations(
     brand: entry.ticket.brand,
     status: entry.ticket.status,
   }));
+}
+
+function mergeTicketCitations(
+  primary: CopilotCitation[],
+  secondary: CopilotCitation[],
+  maxCount = 4,
+): CopilotCitation[] {
+  const merged: CopilotCitation[] = [];
+  const seen = new Set<string>();
+
+  for (const citation of [...primary, ...secondary]) {
+    const key = citation.ticket_id !== null && citation.ticket_id !== undefined
+      ? `ticket:${citation.ticket_id}`
+      : `${citation.source_type}:${citation.reference}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(citation);
+    if (merged.length >= maxCount) break;
+  }
+
+  return merged;
+}
+
+async function fetchTicketCitations(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  query: string,
+  queryEmbedding: number[] | null,
+): Promise<CopilotCitation[]> {
+  const queryLower = query.trim().toLowerCase();
+  if (queryLower.length === 0) return [];
+
+  const explicitTicketId = parseExplicitTicketId(queryLower);
+  const semantic = await fetchSemanticTicketCitations(supabaseAdmin, queryEmbedding);
+
+  if (explicitTicketId === null && semantic.length >= 4) {
+    return semantic;
+  }
+
+  const lexical = await fetchLexicalTicketCitations(supabaseAdmin, query);
+  return explicitTicketId !== null
+    ? mergeTicketCitations(lexical, semantic)
+    : mergeTicketCitations(semantic, lexical);
 }
 
 function buildEvidenceBlock(documentCitations: CopilotCitation[], ticketCitations: CopilotCitation[]): string {
@@ -397,9 +552,17 @@ serve(async (req) => {
     let documentCitations: CopilotCitation[] = [];
     let ticketCitations: CopilotCitation[] = [];
     if (latestQuery.length > 0 && supabaseAdmin) {
+      let queryEmbedding: number[] | null = null;
+      try {
+        queryEmbedding = await createQueryEmbedding(latestQuery);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown query embedding error";
+        console.warn("Copilot query embedding failed", message);
+      }
+
       [documentCitations, ticketCitations] = await Promise.all([
-        fetchDocumentCitations(supabaseAdmin, latestQuery),
-        fetchTicketCitations(supabaseAdmin, latestQuery),
+        fetchDocumentCitations(supabaseAdmin, latestQuery, queryEmbedding),
+        fetchTicketCitations(supabaseAdmin, latestQuery, queryEmbedding),
       ]);
     }
     const citations = [...documentCitations, ...ticketCitations];
