@@ -859,3 +859,77 @@ Validation:
 Validation:
 - `npm run build` passed.
 - `npm run dev` started successfully on `http://127.0.0.1:8080/`.
+
+## Session Continuation (2026-04-17)
+
+### Iteration 32) Ticket summary backfill + semantic ticket retrieval
+- Added migration `supabase/migrations/20260416190000_add_ticket_summary_semantic_search.sql`:
+  - enables pgvector in the `extensions` schema
+  - creates `public.ticket_embedding_chunks`
+  - adds indexes, RLS, and `match_ticket_embedding_chunks(...)`
+- Added `scripts/backfill_ticket_summaries.py`:
+  - classifies cached summaries as missing, legacy, noncanonical, or stale
+  - refreshes summaries through the deployed `summarize_ticket` function
+  - supports resumable, bounded backfill with retries and ticket-id targeting
+- Added `scripts/index_ticket_summaries.py`:
+  - embeds canonical ticket summaries only
+  - writes summary embeddings to `ticket_embedding_chunks`
+  - skips unchanged rows by timestamp/checksum unless forced
+- Extended `supabase/functions/copilot_chat/index.ts`:
+  - creates query embeddings
+  - calls `match_ticket_embedding_chunks`
+  - merges semantic ticket evidence with lexical ticket matches for citations
+- Updated `supabase/functions/summarize_ticket/index.ts` so ticket summaries normalize back into the canonical retrieval format:
+  - `Issue:`
+  - `Troubleshooting:`
+  - `Resolution:`
+
+Git:
+- Committed to `main` as `bf26828` with message:
+  - `Add ticket summary backfill and semantic ticket retrieval`
+
+### Iteration 33) Ticket embedding tooling refinement + validation queries
+- Added ticket range and ordering controls to both operator scripts:
+  - `--ticket-id-min`
+  - `--ticket-id-max`
+  - `--order`
+- Added migration `supabase/migrations/20260416201500_filter_ticket_semantic_search_to_canonical_summaries.sql`:
+  - restricts semantic retrieval to canonical ticket summaries only
+- Added `docs/ticket_embedding_queries.sql`:
+  - coverage summary
+  - freshness checks
+  - duplicate checks
+  - canonical-vs-embedded gap queries
+  - brand/status breakdowns
+- Refined `copilot_chat` prompt behavior so it answers the actual question first and only includes recommendations when the user explicitly asks for them.
+
+Git:
+- Committed to `main` as `0819bff` with message:
+  - `Refine copilot UX and ticket embedding tools`
+
+## Current State Snapshot (2026-04-22)
+
+- Public `/`
+  - support coverage calendar
+  - overview cards for live schedule context
+  - Omni Arena `No Support` table visible on the public page
+- Private `/hub`
+  - route-aware workspace shell for tickets, digests, documents, videos, and reports
+  - floating Copilot chat with structured citations
+  - document semantic search and ticket semantic retrieval both wired into Copilot
+- Ticket semantic retrieval path is implemented end-to-end in code:
+  - summaries are normalized into canonical `Issue / Troubleshooting / Resolution` format
+  - canonical summaries can be backfilled with `scripts/backfill_ticket_summaries.py`
+  - embeddings are stored in `ticket_embedding_chunks`
+  - semantic retrieval runs through `match_ticket_embedding_chunks(...)`
+  - validation SQL lives in `docs/ticket_embedding_queries.sql`
+
+## Resume Notes
+
+- The repo contains the full ticket-embedding implementation in source control.
+- What is not recorded in source control is the live Supabase coverage state: how many summaries were backfilled and how many embeddings were actually indexed.
+- Safe restart order for the embedding job:
+  1. `python3 scripts/backfill_ticket_summaries.py --dry-run --include-stale --order desc`
+  2. `python3 scripts/index_ticket_summaries.py --dry-run --purge-noncanonical-existing --order desc`
+  3. run bounded live batches with `--max-tickets`, `--ticket-id-min`, or `--ticket-id-max`
+  4. validate with `docs/ticket_embedding_queries.sql`
