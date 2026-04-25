@@ -71,6 +71,21 @@ type SupabaseRpcError = {
   message?: string;
 };
 
+type SyncRunsQuery = {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  tickets_fetched: number | null;
+  tickets_upserted: number | null;
+  error_message: string | null;
+  cursor: number | null;
+};
+
+type SyncRunIdQuery = {
+  id: string;
+};
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -320,7 +335,10 @@ async function invokeSyncZendesk(): Promise<SyncZendeskResponse> {
   return payload as SyncZendeskResponse;
 }
 
-async function fetchSyncRunById(supabaseAdmin: any, runId: string): Promise<SyncRunRow | null> {
+async function fetchSyncRunById(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  runId: string,
+): Promise<SyncRunRow | null> {
   const { data, error } = await supabaseAdmin
     .from("zendesk_sync_runs")
     .select("id,started_at,finished_at,status,tickets_fetched,tickets_upserted,error_message,cursor")
@@ -330,10 +348,10 @@ async function fetchSyncRunById(supabaseAdmin: any, runId: string): Promise<Sync
   if (error) {
     throw new Error(`Failed to load sync run ${runId}: ${error.message}`);
   }
-  return (data as SyncRunRow | null) ?? null;
+  return (data as SyncRunsQuery | null) ?? null;
 }
 
-async function fetchLatestSyncRun(supabaseAdmin: any): Promise<SyncRunRow | null> {
+async function fetchLatestSyncRun(supabaseAdmin: ReturnType<typeof createClient>): Promise<SyncRunRow | null> {
   const { data, error } = await supabaseAdmin
     .from("zendesk_sync_runs")
     .select("id,started_at,finished_at,status,tickets_fetched,tickets_upserted,error_message,cursor")
@@ -344,10 +362,10 @@ async function fetchLatestSyncRun(supabaseAdmin: any): Promise<SyncRunRow | null
   if (error) {
     throw new Error(`Failed to load latest sync run: ${error.message}`);
   }
-  return (data as SyncRunRow | null) ?? null;
+  return (data as SyncRunsQuery | null) ?? null;
 }
 
-async function waitForRunningSyncToFinish(supabaseAdmin: any): Promise<SyncRunRow | null> {
+async function waitForRunningSyncToFinish(supabaseAdmin: ReturnType<typeof createClient>): Promise<SyncRunRow | null> {
   const { data: runningRow, error: runningError } = await supabaseAdmin
     .from("zendesk_sync_runs")
     .select("id")
@@ -360,7 +378,7 @@ async function waitForRunningSyncToFinish(supabaseAdmin: any): Promise<SyncRunRo
     throw new Error(`Failed to inspect running sync: ${runningError.message}`);
   }
 
-  const running = (runningRow as { id: string } | null) ?? null;
+  const running = (runningRow as SyncRunIdQuery | null) ?? null;
   if (!running?.id) {
     return fetchLatestSyncRun(supabaseAdmin);
   }

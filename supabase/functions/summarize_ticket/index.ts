@@ -13,6 +13,12 @@ type GeneratedSummary = SummaryPayload & {
   model: string;
 };
 
+type OpenAiEmbeddingPayload = {
+  data?: Array<{
+    embedding?: unknown;
+  }>;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -24,6 +30,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL");
 const OPENAI_MODEL_FALLBACKS = Deno.env.get("OPENAI_MODEL_FALLBACKS");
+const OPENAI_EMBEDDING_MODEL = Deno.env.get("OPENAI_EMBEDDING_MODEL") || "text-embedding-3-small";
 const ZENDESK_SUBDOMAIN = Deno.env.get("ZENDESK_SUBDOMAIN");
 const ZENDESK_EMAIL = Deno.env.get("ZENDESK_EMAIL");
 const ZENDESK_API_TOKEN = Deno.env.get("ZENDESK_API_TOKEN");
@@ -459,6 +466,58 @@ function parseSummary(rawContent: string, fallbackTicketStatus: unknown): Summar
   return buildCanonicalSummary(parsedSections, fallbackTicketStatus);
 }
 
+function vectorLiteral(values: number[]): string {
+  return `[${values.map((value) => value.toFixed(10)).join(",")}]`;
+}
+
+async function computeChecksum(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((part) => part.toString(16).padStart(2, "0")).join("");
+}
+
+async function createSummaryEmbedding(summary: string): Promise<number[]> {
+  if (!OPENAI_API_KEY) {
+    throw new Error("Missing required environment variable: OPENAI_API_KEY");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OPENAI_EMBEDDING_MODEL,
+      input: summary,
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`OpenAI embeddings request failed (${response.status}): ${text}`);
+  }
+
+  let payload: OpenAiEmbeddingPayload;
+  try {
+    payload = JSON.parse(text) as OpenAiEmbeddingPayload;
+  } catch {
+    throw new Error("OpenAI embeddings returned malformed JSON.");
+  }
+
+  const embeddingValue = payload.data?.[0]?.embedding;
+  if (!Array.isArray(embeddingValue) || embeddingValue.length === 0) {
+    throw new Error("OpenAI embeddings response missing embedding data.");
+  }
+
+  return embeddingValue.map((value) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error("OpenAI embeddings response contains invalid vector value.");
+    }
+    return value;
+  });
+}
+
 function compactTicketForPrompt(ticket: Record<string, unknown>): Record<string, unknown> {
   const rawPayload = (ticket.raw_payload && typeof ticket.raw_payload === "object")
     ? ticket.raw_payload as Record<string, unknown>
@@ -626,6 +685,41 @@ serve(async (req) => {
 
     if (cacheUpdateError) {
       throw new Error(`Failed to update ticket cache summary pointer: ${cacheUpdateError.message}`);
+    }
+
+    try {
+      const embedding = await createSummaryEmbedding(generated.summary);
+      const contentChecksum = await computeChecksum(generated.summary);
+      const { error: embeddingUpsertError } = await supabaseAdmin
+        .from("ticket_embedding_chunks")
+        .upsert(
+          {
+            ticket_id: ticketId,
+            brand: String(ticket.brand ?? "unknown"),
+            status: String(ticket.status ?? "unknown"),
+            subject: String(ticket.subject ?? ""),
+            ticket_url: typeof ticket.ticket_url === "string" ? ticket.ticket_url : null,
+            zendesk_updated_at: typeof ticket.zendesk_updated_at === "string" ? ticket.zendesk_updated_at : null,
+            summary_updated_at: nowIso,
+            source: "summary",
+            chunk_index: 0,
+            content_text: generated.summary,
+            content_checksum: contentChecksum,
+            token_count: generated.summary.split(/\s+/).filter((part) => part.length > 0).length,
+            embedding: vectorLiteral(embedding),
+            embedded_at: nowIso,
+          },
+          { onConflict: "ticket_id,source,chunk_index" },
+        );
+
+      if (embeddingUpsertError) {
+        throw new Error(`Failed to store ticket embedding: ${embeddingUpsertError.message}`);
+      }
+    } catch (embeddingError) {
+      console.warn(
+        "Failed to update ticket summary embedding",
+        embeddingError instanceof Error ? embeddingError.message : "unknown_embedding_error",
+      );
     }
 
     return jsonResponse({

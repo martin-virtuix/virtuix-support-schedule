@@ -523,6 +523,14 @@ function buildEvidenceBlock(documentCitations: CopilotCitation[], ticketCitation
   return lines.join("\n");
 }
 
+function stripInlineCitationMarkers(value: string): string {
+  return value
+    .replace(/\s*\[((?:DOC|TICKET)\d+(?:\s*,\s*(?:DOC|TICKET)\d+)*)\]/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -579,12 +587,13 @@ serve(async (req) => {
       "You are Virtuix Support Copilot.",
       "Be concise, practical, and grounded in the retrieved evidence.",
       "Answer the user's actual question directly before offering any recommendations.",
-      "If evidence is provided, ground your answer in it and cite markers like [DOC1] or [TICKET1].",
+      "If evidence is provided, ground your answer in it, but do not include inline citation markers like [DOC1] or [TICKET1] in the user-visible reply.",
       "If evidence is not enough, say exactly what is missing.",
       explicitlyAskedForActions
         ? "The user explicitly asked for recommendations or next steps, so include a short actions section only if it is supported by the evidence."
         : "Do not include a 'next steps', 'next best actions', or recommendation section unless the user explicitly asks for it.",
       "Use short paragraphs by default. Use bullets only when they clearly improve readability.",
+      "Do not output bracketed ticket or document citation tags. References are shown separately in the UI citation bubbles.",
       `Current context: omni_one=${context.omni_one_ticket_count ?? "unknown"}, omni_arena=${context.omni_arena_ticket_count ?? "unknown"}, digests=${context.digest_count ?? "unknown"}`,
     ].join(" ");
 
@@ -602,7 +611,7 @@ serve(async (req) => {
 
     return jsonResponse({
       ok: true,
-      reply: completion.content,
+      reply: stripInlineCitationMarkers(completion.content),
       citations,
       model: completion.model,
     });
